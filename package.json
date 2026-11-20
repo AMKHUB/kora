@@ -1,0 +1,27 @@
+{
+  "name": "kora",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"node server.js\" \"vite\"",
+    "build": "node scripts/make-icons.mjs && tsc --noEmit && vite build",
+    "start": "NODE_ENV=production node server.js",
+    "postbuild": "node -e \"require('fs').copyFileSync('dist/index.html','dist/404.html')\""
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.119.0",
+    "compression": "^1.7.4",
+    "express": "^4.19.2",
+    "hls.js": "^1.7.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "concurrently": "^8.2.2",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}

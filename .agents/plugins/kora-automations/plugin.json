@@ -1,0 +1,11 @@
+{
+  "name": "kora-automations",
+  "displayName": "Kora Automations",
+  "version": "1.0.0",
+  "description": "Project-specific skills, lifecycle hooks, review subagents, and Playwright MCP integration for Kora.",
+  "suggestedPrompts": [
+    "Draft a Supabase SQL migration with RLS policies for Kora",
+    "Sync CSP headers between server.js and vercel.json",
+    "Run a security or UI accessibility review on src/"
+  ]
+}

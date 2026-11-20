@@ -1,0 +1,10 @@
+dist
+node_modules
+.env
+.env.local
+.vercel
+.playwright-mcp
+# Générés au build depuis brand/ par scripts/make-icons.mjs
+public/*.png
+public/*.ico
+public/brand/

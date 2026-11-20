@@ -1,0 +1,30 @@
+{
+  "protect-sensitive-files": {
+    "PreToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/protect-files.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "typecheck-on-edit": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/typecheck-on-edit.mjs",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

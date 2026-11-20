@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Kora · couleurs de marque. Source : tokens.json. -->
+<resources>
+    <color name="brand_surface">#FBF9F4</color>
+    <color name="brand_on_surface">#242119</color>
+    <color name="brand_on_surface_variant">#75726A</color>
+    <color name="brand_primary">#906D03</color>
+    <color name="brand_on_primary">#FFFFFF</color>
+    <color name="brand_outline_variant">#E3DED1</color>
+</resources>
