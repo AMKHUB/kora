@@ -26,5 +26,33 @@
         ]
       }
     ]
+  },
+  "verify-csp-parity": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/verify-csp-parity.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  },
+  "sync-brand-assets": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/sync-brand-assets.mjs",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
   }
 }
