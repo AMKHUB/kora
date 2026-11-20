@@ -3,7 +3,7 @@ import type { Session } from '@supabase/supabase-js'
 import { sb } from '../supabase'
 import { Icon, KoraSymbol } from '../ui'
 
-type StudioTab = 'dashboard' | 'content' | 'upload' | 'channel' | 'analytics'
+type StudioTab = 'browse' | 'dashboard' | 'content' | 'upload' | 'channel' | 'analytics'
 
 type EpisodeDraft = {
   localId: string
@@ -41,7 +41,18 @@ type StudioTitle = {
   access_tier: 'free' | 'premium'
   created_at: string
   channelName?: string
-  isLocal?: boolean
+}
+
+type PublicCatalogItem = {
+  id: number
+  title: string
+  type: 'series' | 'film' | 'doc' | 'short'
+  year: number
+  country: string
+  age_rating: string
+  synopsis_short: string
+  poster_url: string
+  genres: string[]
 }
 
 type ChannelInfo = {
@@ -50,8 +61,12 @@ type ChannelInfo = {
   country: string
 }
 
-const LOCAL_STUDIO_KEY = 'kora-studio-items'
-const LOCAL_CHANNEL_KEY = 'kora-studio-channel'
+const DEFAULT_CHANNEL: ChannelInfo = {
+  channel_name: 'Mon Studio Kora',
+  bio: 'Créations originales maliennes et africaines.',
+  country: 'Mali'
+}
+
 const COUNTRIES = ['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger', 'Ghana', 'Nigeria', 'Cameroun', 'Afrique du Sud', 'Diaspora', 'France']
 const GENRES = ['Drame', 'Comédie', 'Romance', 'Action', 'Documentaire', 'Animation', 'Histoire', 'Musique', 'Jeunesse']
 const LANGS: [string, string][] = [['fr', 'Français'], ['bm', 'Bambara'], ['wo', 'Wolof'], ['ff', 'Peul'], ['en', 'Anglais'], ['ar', 'Arabe']]
@@ -59,6 +74,14 @@ const AGES = ['Tous', '7+', '12+', '16+', '18+']
 const TYPE_LABELS: Record<string, string> = { series: 'Série', film: 'Film', doc: 'Documentaire', short: 'Court-métrage' }
 
 const safeName = (n: string) => n.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
+
+const frAuthError = (m: string) =>
+  /invalid login/i.test(m) ? 'E-mail ou mot de passe incorrect.'
+    : /email not confirmed/i.test(m) ? 'Votre adresse e-mail n’est pas encore confirmée. Vérifiez vos spams ou cliquez sur « Renvoyer l’e-mail de confirmation ».'
+      : /already registered|user_repeated_signup/i.test(m) ? 'Cet e-mail possède déjà un compte Kora. Connectez-vous ou réinitialisez votre mot de passe.'
+        : /password should be/i.test(m) ? 'Mot de passe trop court (6 caractères minimum).'
+          : /rate limit|security purposes|only request this after/i.test(m) ? 'Trop d’e-mails envoyés récemment (limite anti-spam Supabase). Patientez quelques minutes puis réessayez.'
+            : m
 
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -69,70 +92,76 @@ function readFileAsDataUrl(file: File): Promise<string> {
   })
 }
 
-function loadLocalTitles(): StudioTitle[] {
-  try {
-    const raw = localStorage.getItem(LOCAL_STUDIO_KEY)
-    if (!raw) return []
-    return JSON.parse(raw)
-  } catch { return [] }
-}
-
-function saveLocalTitles(list: StudioTitle[]) {
-  try {
-    const serialized = list.map(t => ({
-      ...t,
-      langs: [LANGS.find(([c]) => c === t.original_language)?.[1] || 'Français'],
-      age: t.age_rating,
-      dur: t.duration_min,
-      synopsis: t.synopsis_long || t.synopsis_short,
-      poster: t.poster_url,
-      backdrop: t.backdrop_url,
-      seasons: t.type === 'series' ? Math.max(1, ...t.episodes.map(e => e.season), 1) : undefined,
-      episodesBySeason: t.type === 'series'
-        ? t.episodes.reduce<Record<number, any[]>>((acc, ep) => {
-            acc[ep.season] = [...(acc[ep.season] || []), {
-              number: ep.number, title: ep.title, synopsis: ep.synopsis,
-              duration_min: ep.duration_min, intro_end_sec: ep.intro_end_sec
-            }]
-            return acc
-          }, {})
-        : undefined
-    }))
-    localStorage.setItem(LOCAL_STUDIO_KEY, JSON.stringify(serialized))
-  } catch { /* quota localStorage */ }
-}
-
-function loadLocalChannel(): ChannelInfo {
-  try {
-    const raw = localStorage.getItem(LOCAL_CHANNEL_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch { /* ignoré */ }
-  return { channel_name: 'Mon Studio Kora', bio: 'Créations originales maliennes et africaines.', country: 'Mali' }
-}
-
 export default function StudioApp() {
   const [session, setSession] = useState<Session | null>(null)
-  const [tab, setTab] = useState<StudioTab>('dashboard')
-  const [channel, setChannel] = useState<ChannelInfo>(loadLocalChannel)
-  const [titles, setTitles] = useState<StudioTitle[]>(loadLocalTitles)
+  const [authReady, setAuthReady] = useState(!sb)
+  const [recoveryMode, setRecoveryMode] = useState(() => new URLSearchParams(location.search).has('recovery'))
+  const [tab, setTab] = useState<StudioTab>('browse')
+  const [channel, setChannel] = useState<ChannelInfo>(DEFAULT_CHANNEL)
+  const [titles, setTitles] = useState<StudioTitle[]>([])
+  const [publicItems, setPublicItems] = useState<PublicCatalogItem[]>([])
+  const [publicLoading, setPublicLoading] = useState(true)
+  const [publicSearch, setPublicSearch] = useState('')
   const [editing, setEditing] = useState<StudioTitle | null>(null)
   const [toast, setToast] = useState<{ msg: string; kind: 'ok' | 'err' | 'info' } | null>(null)
   const [authModal, setAuthModal] = useState(false)
-  const [authEmail, setAuthEmail] = useState('')
-  const [authPw, setAuthPw] = useState('')
-  const [authSignup, setAuthSignup] = useState(false)
-  const [authBusy, setAuthBusy] = useState(false)
-  const [authMsg, setAuthMsg] = useState('')
 
   const notify = (msg: string, kind: 'ok' | 'err' | 'info' = 'ok') => {
     setToast({ msg, kind })
     window.setTimeout(() => setToast(null), 4000)
   }
 
+  const loadPublicCatalog = async () => {
+    if (!sb) { setPublicItems([]); setPublicLoading(false); return }
+    setPublicLoading(true)
+    const { data } = await sb
+      .from('titles')
+      .select('id,title,type,year,country,age_rating,synopsis_short,poster_url,title_genres(genres(name))')
+      .eq('status', 'published')
+      .not('poster_url', 'is', null)
+      .neq('poster_url', '')
+      .order('id', { ascending: false })
+    const mapped: PublicCatalogItem[] = (data || [])
+      .filter((t: any) => typeof t.poster_url === 'string' && t.poster_url.trim().length > 0)
+      .map((t: any) => ({
+        id: t.id,
+        title: t.title,
+        type: t.type,
+        year: t.year || new Date().getFullYear(),
+        country: t.country || 'Mali',
+        age_rating: t.age_rating || 'Tous',
+        synopsis_short: t.synopsis_short || '',
+        poster_url: t.poster_url,
+        genres: (t.title_genres || []).map((x: any) => x.genres?.name).filter(Boolean)
+      }))
+    setPublicItems(mapped)
+    setPublicLoading(false)
+  }
+
   useEffect(() => {
+    loadPublicCatalog()
     if (!sb) return
-    sb.auth.getSession().then(({ data }) => setSession(data.session))
-    const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s))
+    sb.auth.getSession().then(({ data }) => {
+      setSession(data.session)
+      setAuthReady(true)
+      if (data.session) setTab(t => t === 'browse' ? 'dashboard' : t)
+    })
+    const { data } = sb.auth.onAuthStateChange((event, s) => {
+      setSession(s)
+      setAuthReady(true)
+      if (event === 'PASSWORD_RECOVERY') {
+        setRecoveryMode(true)
+        setAuthModal(true)
+      } else if (event === 'SIGNED_IN' && s) {
+        setAuthModal(false)
+        setTab(t => t === 'browse' ? 'dashboard' : t)
+      } else if (event === 'SIGNED_OUT') {
+        setTitles([])
+        setChannel(DEFAULT_CHANNEL)
+        setEditing(null)
+        setTab('browse')
+      }
+    })
     return () => data.subscription.unsubscribe()
   }, [])
 
@@ -187,99 +216,108 @@ export default function StudioApp() {
 
   useEffect(() => {
     if (session?.user.id) loadCloudCreatorData(session.user.id)
-    else setTitles(loadLocalTitles())
+    else setTitles([])
   }, [session?.user.id])
 
+  const requireStudioAuth = (actionLabel?: string): boolean => {
+    if (session) return true
+    notify(actionLabel ? `Connectez-vous pour ${actionLabel}.` : 'Connectez-vous pour accéder à Kora Studio.', 'info')
+    setAuthModal(true)
+    return false
+  }
+
+  const openTab = (next: StudioTab) => {
+    if (next !== 'browse' && !session) {
+      setTab(next)
+      return
+    }
+    setTab(next)
+  }
+
   const startNewUpload = () => {
+    if (!requireStudioAuth('mettre en ligne une série ou vidéo')) return
     setEditing(null)
     setTab('upload')
   }
 
   const openEditor = (t: StudioTitle) => {
+    if (!requireStudioAuth('modifier une œuvre')) return
     setEditing(t)
     setTab('upload')
   }
 
   const togglePublish = async (t: StudioTitle) => {
+    if (!sb || !requireStudioAuth('modifier la visibilité')) return
     const next: StudioTitle['status'] = t.status === 'published' ? 'draft' : 'published'
-    if (sb && session && !t.isLocal) {
-      const { error } = await sb.from('titles').update({ status: next, updated_at: new Date().toISOString() }).eq('id', t.id)
-      if (error) { notify(error.message, 'err'); return }
-      await loadCloudCreatorData(session.user.id)
-    } else {
-      const updated = titles.map(x => x.id === t.id ? { ...x, status: next } : x)
-      setTitles(updated); saveLocalTitles(updated)
+    if (next === 'published' && !t.poster_url.trim()) {
+      notify('Ajoutez d’abord une page de couverture (affiche 2:3) avant de publier sur Kora.', 'err')
+      return
     }
+    const { error } = await sb.from('titles').update({ status: next, updated_at: new Date().toISOString() }).eq('id', t.id)
+    if (error) { notify(error.message, 'err'); return }
+    await Promise.all([loadCloudCreatorData(session!.user.id), loadPublicCatalog()])
     notify(next === 'published' ? `« ${t.title} » est publié sur Kora !` : `« ${t.title} » repassé en brouillon.`)
   }
 
   const deleteTitle = async (t: StudioTitle) => {
+    if (!sb || !requireStudioAuth('supprimer une œuvre')) return
     if (!confirm(`Supprimer définitivement « ${t.title} » ?`)) return
-    if (sb && session && !t.isLocal) {
-      const { error } = await sb.from('titles').delete().eq('id', t.id)
-      if (error) { notify(error.message, 'err'); return }
-      await loadCloudCreatorData(session.user.id)
-    } else {
-      const updated = titles.filter(x => x.id !== t.id)
-      setTitles(updated); saveLocalTitles(updated)
-    }
+    const { error } = await sb.from('titles').delete().eq('id', t.id)
+    if (error) { notify(error.message, 'err'); return }
+    await Promise.all([loadCloudCreatorData(session!.user.id), loadPublicCatalog()])
     notify('Contenu supprimé.', 'info')
   }
 
   const saveChannel = async (e: React.FormEvent) => {
     e.preventDefault()
-    try { localStorage.setItem(LOCAL_CHANNEL_KEY, JSON.stringify(channel)) } catch { /* ignoré */ }
-    if (sb && session) {
-      const { error } = await sb.from('creator_channels').upsert({
-        account_id: session.user.id,
-        channel_name: channel.channel_name.trim() || 'Mon Studio Kora',
-        bio: channel.bio.trim(),
-        country: channel.country,
-        updated_at: new Date().toISOString()
-      })
-      if (error) { notify(error.message, 'err'); return }
-    }
+    if (!sb || !requireStudioAuth('enregistrer votre chaîne')) return
+    const { error } = await sb.from('creator_channels').upsert({
+      account_id: session!.user.id,
+      channel_name: channel.channel_name.trim() || 'Mon Studio Kora',
+      bio: channel.bio.trim(),
+      country: channel.country,
+      updated_at: new Date().toISOString()
+    })
+    if (error) { notify(error.message, 'err'); return }
     notify('Chaîne créateur enregistrée.')
-  }
-
-  const submitAuth = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!sb) return
-    setAuthBusy(true); setAuthMsg('')
-    const r = authSignup
-      ? await sb.auth.signUp({ email: authEmail, password: authPw, options: { data: { name: channel.channel_name } } })
-      : await sb.auth.signInWithPassword({ email: authEmail, password: authPw })
-    setAuthBusy(false)
-    if (r.error) setAuthMsg(r.error.message)
-    else if (r.data?.session) { setAuthModal(false); notify('Connecté à Kora Studio !') }
-    else setAuthMsg('Vérifiez votre boîte e-mail pour confirmer votre compte.')
   }
 
   const publishedCount = titles.filter(t => t.status === 'published').length
   const totalEpisodes = titles.reduce((a, t) => a + (t.episodes?.length || 0), 0)
 
-  const navItems: [StudioTab, string, string][] = [
-    ['dashboard', 'Tableau de bord', 'home'],
-    ['content', 'Mes séries & vidéos', 'film'],
-    ['upload', 'Mettre en ligne', 'upload'],
-    ['channel', 'Ma chaîne', 'user'],
-    ['analytics', 'Statistiques & Revenus', 'sparkles']
+  const navItems: [StudioTab, string, string, boolean][] = [
+    ['browse', 'Catalogue public', 'grid', false],
+    ['dashboard', 'Tableau de bord', 'home', true],
+    ['content', 'Mes séries & vidéos', 'film', true],
+    ['upload', 'Mettre en ligne', 'upload', true],
+    ['channel', 'Ma chaîne', 'user', true],
+    ['analytics', 'Statistiques & Revenus', 'sparkles', true]
   ]
+
+  const filteredPublic = publicItems.filter(it => {
+    const q = publicSearch.trim().toLowerCase()
+    if (!q) return true
+    return `${it.title} ${it.country} ${it.genres.join(' ')} ${it.synopsis_short}`.toLowerCase().includes(q)
+  })
+
+  const needsAuthOnCurrentTab = tab !== 'browse' && !session
 
   return (
     <div className="studio-shell">
       <header className="studio-topbar">
-        <a className="studio-logo" href="/studio/" onClick={e => { e.preventDefault(); setTab('dashboard') }}>
+        <a className="studio-logo" href="/studio/" onClick={e => { e.preventDefault(); setTab(session ? 'dashboard' : 'browse') }}>
           <KoraSymbol size={28} />
           <span className="kora-wordmark" style={{ fontSize: 22, color: '#EDEBE4' }}>Kora</span>
           <span className="studio-tag">Studio</span>
         </a>
 
         <div className="studio-top-acts">
-          <button type="button" className="btn p" onClick={startNewUpload}>
-            <Icon n="upload" s={18} />
-            <span>Mettre en ligne</span>
-          </button>
+          {session && (
+            <button type="button" className="btn p" onClick={startNewUpload}>
+              <Icon n="upload" s={18} />
+              <span>Mettre en ligne</span>
+            </button>
+          )}
           <a className="btn" href="/">
             <Icon n="tv" s={18} />
             <span>Voir Kora</span>
@@ -287,15 +325,15 @@ export default function StudioApp() {
           {sb && (
             session
               ? <button type="button" className="btn" onClick={() => sb?.auth.signOut()}>Déconnexion</button>
-              : <button type="button" className="btn" onClick={() => setAuthModal(true)}>Connexion</button>
+              : <button type="button" className="btn p" onClick={() => setAuthModal(true)}><Icon n="user" s={18} />Se connecter</button>
           )}
         </div>
       </header>
 
       <div className="studio-mobile-tabs" role="tablist">
-        {navItems.map(([k, label]) => (
-          <button key={k} type="button" role="tab" aria-selected={tab === k} className={'chip' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>
-            {label}
+        {navItems.map(([k, label, _icon, locked]) => (
+          <button key={k} type="button" role="tab" aria-selected={tab === k} className={'chip' + (tab === k ? ' on' : '')} onClick={() => openTab(k)}>
+            {locked && !session ? '🔒 ' : ''}{label}
           </button>
         ))}
       </div>
@@ -303,16 +341,18 @@ export default function StudioApp() {
       <div className="studio-body">
         <aside className="studio-nav" aria-label="Navigation Kora Studio">
           <div className="studio-channel-mini">
-            <span className="studio-channel-badge">{(channel.channel_name || 'KS').slice(0, 2).toUpperCase()}</span>
+            <span className="studio-channel-badge">{session ? (channel.channel_name || 'KS').slice(0, 2).toUpperCase() : 'K'}</span>
             <div style={{ minWidth: 0 }}>
-              <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{channel.channel_name}</strong>
-              <small className="mu">{session ? (session.user.email || 'Connecté') : 'Mode créateur local'}</small>
+              <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {session ? channel.channel_name : 'Visiteur (lecture seule)'}
+              </strong>
+              <small className="mu">{session ? (session.user.email || 'Connecté') : 'Connexion requise pour publier'}</small>
             </div>
           </div>
 
-          {navItems.map(([k, label, icon]) => (
-            <button key={k} type="button" className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-              <Icon n={icon} s={19} />
+          {navItems.map(([k, label, icon, locked]) => (
+            <button key={k} type="button" className={tab === k ? 'on' : ''} onClick={() => openTab(k)}>
+              <Icon n={locked && !session ? 'lock' : icon} s={19} />
               <span>{label}</span>
             </button>
           ))}
@@ -320,200 +360,277 @@ export default function StudioApp() {
         </aside>
 
         <main className="studio-main">
-          {!session && sb && (
-            <div className="auth-banner">
-              <div>
-                <strong>Mode aperçu local Kora Studio</strong> — Connectez-vous pour synchroniser vos séries, couvertures et vidéos dans le cloud Supabase (visibles par tous les spectateurs Kora).
-              </div>
-              <button type="button" className="btn p" onClick={() => setAuthModal(true)}>Se connecter / Créer une chaîne</button>
-            </div>
-          )}
-
-          {tab === 'dashboard' && (
-            <>
-              <div className="page-head">
-                <div>
-                  <h1>Tableau de bord de la chaîne</h1>
-                  <p className="mu">{channel.channel_name} · Publiez vos séries, épisodes et films comme sur YouTube Studio.</p>
-                </div>
-                <button type="button" className="btn p" onClick={startNewUpload}>
-                  <Icon n="upload" s={18} />Uploader une nouvelle série
-                </button>
-              </div>
-
-              <dl className="stats">
-                <div><dt>Séries & Œuvres</dt><dd>{titles.length}</dd></div>
-                <div><dt>En ligne sur Kora</dt><dd>{publishedCount}</dd></div>
-                <div><dt>Épisodes mis en ligne</dt><dd>{totalEpisodes}</dd></div>
-                <div><dt>Brouillons</dt><dd>{titles.length - publishedCount}</dd></div>
-              </dl>
-
-              <section className="panel">
-                <div className="panel-head">
-                  <h2>Vos créations récentes</h2>
-                  {titles.length > 0 && <button type="button" className="lnk" onClick={() => setTab('content')}>Tout gérer</button>}
-                </div>
-                {!titles.length ? (
-                  <div className="empty-box">
-                    <div className="drop-icon"><Icon n="upload" s={26} /></div>
-                    <h3>Publiez votre première série sur Kora</h3>
-                    <p className="mu">Glissez vos fichiers vidéo, ajoutez votre page de couverture, votre synopsis et organisez vos saisons et épisodes en quelques minutes.</p>
-                    <button type="button" className="btn p" onClick={startNewUpload}>
-                      <Icon n="upload" s={18} />Commencer la mise en ligne
-                    </button>
-                  </div>
-                ) : (
-                  <div className="studio-content-grid">
-                    {titles.slice(0, 5).map(t => (
-                      <div key={t.id} className="studio-row-card">
-                        <div className="studio-row-thumb">
-                          {t.poster_url ? <img src={t.poster_url} alt="" /> : <span>2:3</span>}
-                        </div>
-                        <div className="studio-row-info">
-                          <strong>{t.title}</strong>
-                          <div className="studio-row-meta">
-                            <span className={t.status === 'published' ? 'pill-ok' : 'pill-spec'}>{t.status === 'published' ? 'Publié sur Kora' : 'Brouillon'}</span>
-                            <span>{TYPE_LABELS[t.type]}</span>
-                            <span>{t.country} · {t.year}</span>
-                            {t.type === 'series' && <span>{t.episodes.length} épisode{t.episodes.length > 1 ? 's' : ''}</span>}
-                          </div>
-                          <p className="mu" style={{ fontSize: '0.86rem' }}>{t.synopsis_short || t.synopsis_long.slice(0, 140)}</p>
-                        </div>
-                        <div className="btns flush">
-                          <button type="button" className="btn" onClick={() => openEditor(t)}><Icon n="edit" s={16} />Modifier</button>
-                          {t.status === 'published' && <a className="btn" href={`/#/titre/${t.id}`}>Voir sur Kora</a>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </section>
-            </>
-          )}
-
-          {tab === 'content' && (
+          {!authReady ? (
+            <p className="mu">Vérification de votre session…</p>
+          ) : tab === 'browse' ? (
             <section>
+              {!session && (
+                <div className="auth-banner">
+                  <div>
+                    <strong>Navigation en lecture seule</strong> — Vous pouvez uniquement parcourir le catalogue publié. Connectez-vous pour accéder à votre espace créateur, créer une chaîne et mettre en ligne vos séries.
+                  </div>
+                  <button type="button" className="btn p" onClick={() => setAuthModal(true)}>
+                    <Icon n="user" s={18} />Se connecter / Créer un compte
+                  </button>
+                </div>
+              )}
+
               <div className="page-head">
                 <div>
-                  <h1>Contenus de la chaîne ({titles.length})</h1>
-                  <p className="mu">Gérez vos séries, couvertures, synopsis, épisodes et leur visibilité sur Kora.</p>
+                  <h1>Catalogue publié sur Kora ({publicItems.length})</h1>
+                  <p className="mu">Seules les séries et œuvres ajoutées avec une page de couverture officielle apparaissent ici.</p>
                 </div>
-                <button type="button" className="btn p" onClick={startNewUpload}><Icon n="plus" s={18} />Nouvelle mise en ligne</button>
+                {session && (
+                  <button type="button" className="btn p" onClick={startNewUpload}>
+                    <Icon n="upload" s={18} />Publier une série
+                  </button>
+                )}
               </div>
-              {!titles.length ? (
+
+              {publicItems.length > 0 && (
+                <div className="sbar" style={{ marginBottom: 20 }}>
+                  <Icon n="search" s={18} />
+                  <input
+                    className="field"
+                    value={publicSearch}
+                    onChange={e => setPublicSearch(e.target.value)}
+                    placeholder="Rechercher dans le catalogue Kora…"
+                    aria-label="Rechercher dans le catalogue public"
+                  />
+                </div>
+              )}
+
+              {publicLoading ? (
+                <p className="mu">Chargement du catalogue…</p>
+              ) : !filteredPublic.length ? (
                 <div className="empty-box">
-                  <p className="mu">Aucune série ou vidéo mise en ligne pour le moment.</p>
-                  <button type="button" className="btn p" onClick={startNewUpload}>Mettre en ligne maintenant</button>
+                  <div className="drop-icon"><Icon n="film" s={26} /></div>
+                  <h3>{publicItems.length ? 'Aucun résultat pour cette recherche' : 'Aucune série publiée pour le moment'}</h3>
+                  <p className="mu">
+                    {publicItems.length
+                      ? 'Essayez un autre mot-clé.'
+                      : 'Les œuvres d’exemple sans couverture ont été retirées. Connectez-vous pour publier la première série avec sa page de couverture et son synopsis.'}
+                  </p>
+                  {!session ? (
+                    <button type="button" className="btn p" onClick={() => setAuthModal(true)}>
+                      <Icon n="user" s={18} />Se connecter pour publier
+                    </button>
+                  ) : (
+                    <button type="button" className="btn p" onClick={startNewUpload}>
+                      <Icon n="upload" s={18} />Mettre en ligne la première série
+                    </button>
+                  )}
                 </div>
               ) : (
-                <div className="studio-content-grid">
-                  {titles.map(t => (
-                    <div key={t.id} className="studio-row-card">
-                      <div className="studio-row-thumb">
-                        {t.poster_url ? <img src={t.poster_url} alt="" /> : <span>2:3</span>}
+                <div className="grid">
+                  {filteredPublic.map(it => (
+                    <a key={it.id} className="card" href={`/#/titre/${it.id}`}>
+                      <div className="poster">
+                        <img src={it.poster_url} alt={it.title} loading="lazy" />
                       </div>
-                      <div className="studio-row-info">
-                        <strong>{t.title}</strong>
-                        <div className="studio-row-meta">
-                          <span className={t.status === 'published' ? 'pill-ok' : 'pill-spec'}>{t.status === 'published' ? 'Publié' : 'Brouillon'}</span>
-                          <span>{TYPE_LABELS[t.type]}</span>
-                          <span>{t.age_rating}</span>
-                          {t.type === 'series' && <span>{t.episodes.length} épisode{t.episodes.length > 1 ? 's' : ''}</span>}
-                        </div>
-                      </div>
-                      <div className="btns flush">
-                        <button type="button" className="btn" onClick={() => openEditor(t)}>Éditer & Épisodes</button>
-                        <button type="button" className="btn" onClick={() => togglePublish(t)}>{t.status === 'published' ? 'Passer en brouillon' : 'Publier'}</button>
-                        <button type="button" className="btn danger" onClick={() => deleteTitle(t)}><Icon n="trash" s={16} /></button>
-                      </div>
-                    </div>
+                      <span className="ct">{it.title}</span>
+                      <span className="cm">{it.country} · {it.year} · {TYPE_LABELS[it.type]}</span>
+                    </a>
                   ))}
                 </div>
               )}
             </section>
-          )}
-
-          {tab === 'upload' && (
-            <UploadWizard
-              key={editing ? `edit-${editing.id}` : 'new'}
-              initial={editing}
-              channel={channel}
-              session={session}
-              onSaved={async (saved, isLocal) => {
-                if (isLocal) {
-                  const next = editing
-                    ? titles.map(x => x.id === saved.id ? saved : x)
-                    : [saved, ...titles]
-                  setTitles(next)
-                  saveLocalTitles(next)
-                } else if (session) {
-                  await loadCloudCreatorData(session.user.id)
-                }
-                notify(saved.status === 'published' ? `« ${saved.title} » est publié sur Kora !` : `« ${saved.title} » enregistré en brouillon.`)
-                setEditing(null)
-                setTab('content')
-              }}
-              onCancel={() => { setEditing(null); setTab('content') }}
-            />
-          )}
-
-          {tab === 'channel' && (
-            <section className="panel form">
-              <h1>Personnalisation de votre chaîne</h1>
-              <p className="mu">Ces informations identifient votre studio auprès des spectateurs sur Kora.</p>
-              <form className="form" onSubmit={saveChannel}>
-                <label>Nom de la chaîne / du studio
-                  <input className="field" required value={channel.channel_name} onChange={e => setChannel(c => ({ ...c, channel_name: e.target.value }))} placeholder="Ex. Bamako Ciné Prod" />
-                </label>
-                <label>Pays d’origine
-                  <select value={channel.country} onChange={e => setChannel(c => ({ ...c, country: e.target.value }))}>
-                    {COUNTRIES.map(c => <option key={c}>{c}</option>)}
-                  </select>
-                </label>
-                <label>Présentation / Biographie
-                  <textarea className="field" rows={4} value={channel.bio} onChange={e => setChannel(c => ({ ...c, bio: e.target.value }))} placeholder="Présentez votre maison de production, vos réalisations et votre univers…" />
-                </label>
-                <div className="btns">
-                  <button type="submit" className="btn p">Enregistrer la chaîne</button>
-                </div>
-              </form>
+          ) : needsAuthOnCurrentTab ? (
+            <section className="panel" style={{ maxWidth: 480, margin: '24px auto' }}>
+              <div style={{ textAlign: 'center', display: 'grid', justifyItems: 'center', gap: 10, marginBottom: 16 }}>
+                <div className="drop-icon"><Icon n="lock" s={24} /></div>
+                <h1>Connexion requise pour Kora Studio</h1>
+                <p className="mu">
+                  Tant que vous n’êtes pas connecté, vous pouvez uniquement parcourir le catalogue public. Connectez-vous pour gérer votre chaîne et mettre en ligne vos séries.
+                </p>
+              </div>
+              <StudioAuthForm
+                recovery={recoveryMode}
+                onSuccess={(msg) => {
+                  setRecoveryMode(false)
+                  notify(msg)
+                }}
+                onBrowse={() => setTab('browse')}
+              />
             </section>
-          )}
+          ) : (
+            <>
+              {tab === 'dashboard' && (
+                <>
+                  <div className="page-head">
+                    <div>
+                      <h1>Tableau de bord de la chaîne</h1>
+                      <p className="mu">{channel.channel_name} · Publiez vos séries, épisodes et films comme sur YouTube Studio.</p>
+                    </div>
+                    <button type="button" className="btn p" onClick={startNewUpload}>
+                      <Icon n="upload" s={18} />Uploader une nouvelle série
+                    </button>
+                  </div>
 
-          {tab === 'analytics' && (
-            <section className="panel">
-              <h1>Statistiques & Monétisation Créateurs</h1>
-              <p className="mu">Suivez l’audience de vos séries et vos revenus estimés sur Kora (partage publicitaire formule gratuite + temps de visionnage Premium).</p>
-              <dl className="stats">
-                <div><dt>Œuvres publiées</dt><dd>{publishedCount}</dd></div>
-                <div><dt>Épisodes disponibles</dt><dd>{totalEpisodes}</dd></div>
-                <div><dt>Partage revenus Kora</dt><dd>70 %</dd></div>
-                <div><dt>Paiement créateurs</dt><dd>FCFA</dd></div>
-              </dl>
-              <p className="mu">Versements disponibles par <strong>Orange Money</strong>, <strong>Moov Money</strong>, <strong>Wave</strong> ou virement bancaire dès l’activation du mode facturation en production.</p>
-            </section>
+                  <dl className="stats">
+                    <div><dt>Séries & Œuvres</dt><dd>{titles.length}</dd></div>
+                    <div><dt>En ligne sur Kora</dt><dd>{publishedCount}</dd></div>
+                    <div><dt>Épisodes mis en ligne</dt><dd>{totalEpisodes}</dd></div>
+                    <div><dt>Brouillons</dt><dd>{titles.length - publishedCount}</dd></div>
+                  </dl>
+
+                  <section className="panel">
+                    <div className="panel-head">
+                      <h2>Vos créations récentes</h2>
+                      {titles.length > 0 && <button type="button" className="lnk" onClick={() => setTab('content')}>Tout gérer</button>}
+                    </div>
+                    {!titles.length ? (
+                      <div className="empty-box">
+                        <div className="drop-icon"><Icon n="upload" s={26} /></div>
+                        <h3>Publiez votre première série sur Kora</h3>
+                        <p className="mu">Glissez vos fichiers vidéo, ajoutez votre page de couverture, votre synopsis et organisez vos saisons et épisodes en quelques minutes.</p>
+                        <button type="button" className="btn p" onClick={startNewUpload}>
+                          <Icon n="upload" s={18} />Commencer la mise en ligne
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="studio-content-grid">
+                        {titles.slice(0, 5).map(t => (
+                          <div key={t.id} className="studio-row-card">
+                            <div className="studio-row-thumb">
+                              {t.poster_url ? <img src={t.poster_url} alt="" /> : <span>2:3</span>}
+                            </div>
+                            <div className="studio-row-info">
+                              <strong>{t.title}</strong>
+                              <div className="studio-row-meta">
+                                <span className={t.status === 'published' ? 'pill-ok' : 'pill-spec'}>{t.status === 'published' ? 'Publié sur Kora' : 'Brouillon'}</span>
+                                <span>{TYPE_LABELS[t.type]}</span>
+                                <span>{t.country} · {t.year}</span>
+                                {t.type === 'series' && <span>{t.episodes.length} épisode{t.episodes.length > 1 ? 's' : ''}</span>}
+                              </div>
+                              <p className="mu" style={{ fontSize: '0.86rem' }}>{t.synopsis_short || t.synopsis_long.slice(0, 140)}</p>
+                            </div>
+                            <div className="btns flush">
+                              <button type="button" className="btn" onClick={() => openEditor(t)}><Icon n="edit" s={16} />Modifier</button>
+                              {t.status === 'published' && <a className="btn" href={`/#/titre/${t.id}`}>Voir sur Kora</a>}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                </>
+              )}
+
+              {tab === 'content' && (
+                <section>
+                  <div className="page-head">
+                    <div>
+                      <h1>Contenus de la chaîne ({titles.length})</h1>
+                      <p className="mu">Gérez vos séries, couvertures, synopsis, épisodes et leur visibilité sur Kora.</p>
+                    </div>
+                    <button type="button" className="btn p" onClick={startNewUpload}><Icon n="plus" s={18} />Nouvelle mise en ligne</button>
+                  </div>
+                  {!titles.length ? (
+                    <div className="empty-box">
+                      <p className="mu">Aucune série ou vidéo mise en ligne pour le moment.</p>
+                      <button type="button" className="btn p" onClick={startNewUpload}>Mettre en ligne maintenant</button>
+                    </div>
+                  ) : (
+                    <div className="studio-content-grid">
+                      {titles.map(t => (
+                        <div key={t.id} className="studio-row-card">
+                          <div className="studio-row-thumb">
+                            {t.poster_url ? <img src={t.poster_url} alt="" /> : <span>2:3</span>}
+                          </div>
+                          <div className="studio-row-info">
+                            <strong>{t.title}</strong>
+                            <div className="studio-row-meta">
+                              <span className={t.status === 'published' ? 'pill-ok' : 'pill-spec'}>{t.status === 'published' ? 'Publié' : 'Brouillon'}</span>
+                              <span>{TYPE_LABELS[t.type]}</span>
+                              <span>{t.age_rating}</span>
+                              {t.type === 'series' && <span>{t.episodes.length} épisode{t.episodes.length > 1 ? 's' : ''}</span>}
+                            </div>
+                          </div>
+                          <div className="btns flush">
+                            <button type="button" className="btn" onClick={() => openEditor(t)}>Éditer & Épisodes</button>
+                            <button type="button" className="btn" onClick={() => togglePublish(t)}>{t.status === 'published' ? 'Passer en brouillon' : 'Publier'}</button>
+                            <button type="button" className="btn danger" onClick={() => deleteTitle(t)}><Icon n="trash" s={16} /></button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              )}
+
+              {tab === 'upload' && session && (
+                <UploadWizard
+                  key={editing ? `edit-${editing.id}` : 'new'}
+                  initial={editing}
+                  channel={channel}
+                  session={session}
+                  onSaved={async (saved) => {
+                    await Promise.all([loadCloudCreatorData(session.user.id), loadPublicCatalog()])
+                    notify(saved.status === 'published' ? `« ${saved.title} » est publié sur Kora !` : `« ${saved.title} » enregistré en brouillon.`)
+                    setEditing(null)
+                    setTab('content')
+                  }}
+                  onCancel={() => { setEditing(null); setTab('content') }}
+                />
+              )}
+
+              {tab === 'channel' && (
+                <section className="panel form">
+                  <h1>Personnalisation de votre chaîne</h1>
+                  <p className="mu">Ces informations identifient votre studio auprès des spectateurs sur Kora.</p>
+                  <form className="form" onSubmit={saveChannel}>
+                    <label>Nom de la chaîne / du studio
+                      <input className="field" required value={channel.channel_name} onChange={e => setChannel(c => ({ ...c, channel_name: e.target.value }))} placeholder="Ex. Bamako Ciné Prod" />
+                    </label>
+                    <label>Pays d’origine
+                      <select value={channel.country} onChange={e => setChannel(c => ({ ...c, country: e.target.value }))}>
+                        {COUNTRIES.map(c => <option key={c}>{c}</option>)}
+                      </select>
+                    </label>
+                    <label>Présentation / Biographie
+                      <textarea className="field" rows={4} value={channel.bio} onChange={e => setChannel(c => ({ ...c, bio: e.target.value }))} placeholder="Présentez votre maison de production, vos réalisations et votre univers…" />
+                    </label>
+                    <div className="btns">
+                      <button type="submit" className="btn p">Enregistrer la chaîne</button>
+                    </div>
+                  </form>
+                </section>
+              )}
+
+              {tab === 'analytics' && (
+                <section className="panel">
+                  <h1>Statistiques & Monétisation Créateurs</h1>
+                  <p className="mu">Suivez l’audience de vos séries et vos revenus estimés sur Kora (partage publicitaire formule gratuite + temps de visionnage Premium).</p>
+                  <dl className="stats">
+                    <div><dt>Œuvres publiées</dt><dd>{publishedCount}</dd></div>
+                    <div><dt>Épisodes disponibles</dt><dd>{totalEpisodes}</dd></div>
+                    <div><dt>Partage revenus Kora</dt><dd>70 %</dd></div>
+                    <div><dt>Paiement créateurs</dt><dd>FCFA</dd></div>
+                  </dl>
+                  <p className="mu">Versements disponibles par <strong>Orange Money</strong>, <strong>Moov Money</strong>, <strong>Wave</strong> ou virement bancaire dès l’activation du mode facturation en production.</p>
+                </section>
+              )}
+            </>
           )}
         </main>
       </div>
 
       {authModal && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setAuthModal(false) }}>
-          <div className="modal" role="dialog" aria-modal="true" aria-label="Connexion Kora Studio" style={{ maxWidth: 420 }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="Connexion Kora Studio" style={{ maxWidth: 440 }}>
             <div className="modal-head">
-              <h2>{authSignup ? 'Créer un compte Créateur' : 'Connexion Kora Studio'}</h2>
+              <h2>{recoveryMode ? 'Nouveau mot de passe' : 'Connexion Kora Studio'}</h2>
               <button type="button" className="icon-btn" onClick={() => setAuthModal(false)} aria-label="Fermer"><Icon n="close" s={18} /></button>
             </div>
-            <form className="auth" onSubmit={submitAuth}>
-              <label>E-mail<input className="field" type="email" required value={authEmail} onChange={e => setAuthEmail(e.target.value)} /></label>
-              <label>Mot de passe<input className="field" type="password" required minLength={6} value={authPw} onChange={e => setAuthPw(e.target.value)} /></label>
-              <button type="submit" className="btn p wide-btn" disabled={authBusy}>{authBusy ? 'Connexion…' : authSignup ? 'Créer mon compte' : 'Se connecter'}</button>
-              {authMsg && <p className="status-box">{authMsg}</p>}
-              <p className="mu auth-links">
-                <button type="button" className="lnk" onClick={() => setAuthSignup(s => !s)}>
-                  {authSignup ? 'J’ai déjà un compte Kora' : 'Nouveau ? Créer un compte créateur'}
-                </button>
-              </p>
-            </form>
+            <StudioAuthForm
+              recovery={recoveryMode}
+              onSuccess={(msg) => {
+                setRecoveryMode(false)
+                setAuthModal(false)
+                notify(msg)
+              }}
+            />
           </div>
         </div>
       )}
@@ -528,13 +645,165 @@ export default function StudioApp() {
 }
 
 /* ============================================================================
+   FORMULAIRE AUTHENTIFICATION KORA STUDIO (avec renvoi confirmation & reset)
+   ============================================================================ */
+function StudioAuthForm({ recovery, onSuccess, onBrowse }: {
+  recovery?: boolean
+  onSuccess: (msg: string) => void
+  onBrowse?: () => void
+}) {
+  const [signup, setSignup] = useState(false)
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [pw, setPw] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false)
+
+  if (!sb) return <p className="mu">Authentification Supabase non configurée.</p>
+  const db = sb
+
+  if (recovery) {
+    const saveNewPw = async (e: React.FormEvent) => {
+      e.preventDefault()
+      if (pw.length < 6) { setMsg('Le mot de passe doit contenir au moins 6 caractères.'); return }
+      setBusy(true); setMsg('')
+      const { error } = await db.auth.updateUser({ password: pw })
+      setBusy(false)
+      if (error) setMsg(frAuthError(error.message))
+      else onSuccess('Nouveau mot de passe enregistré !')
+    }
+    return (
+      <form className="auth" onSubmit={saveNewPw}>
+        <p className="mu">Définissez un nouveau mot de passe pour votre compte Kora Studio.</p>
+        <label>Nouveau mot de passe
+          <input className="field" type="password" required minLength={6} value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" placeholder="6 caractères minimum" />
+        </label>
+        <button type="submit" className="btn p wide-btn" disabled={busy}>{busy ? 'Enregistrement…' : 'Valider le mot de passe'}</button>
+        {msg && <p className="status-box" role="status">{msg}</p>}
+      </form>
+    )
+  }
+
+  const resendConfirmation = async () => {
+    if (!email.trim()) { setMsg('Saisissez votre adresse e-mail.'); return }
+    setBusy(true); setMsg('')
+    const { error } = await db.auth.resend({
+      type: 'signup',
+      email: email.trim(),
+      options: { emailRedirectTo: `${location.origin}/studio/` }
+    })
+    setBusy(false)
+    if (error) setMsg(frAuthError(error.message))
+    else setMsg('E-mail de confirmation renvoyé ! Vérifiez aussi votre dossier Spam / Indésirables.')
+  }
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const cleanEmail = email.trim()
+    setBusy(true); setMsg(''); setAwaitingConfirm(false)
+    if (signup) {
+      const r = await db.auth.signUp({
+        email: cleanEmail,
+        password: pw,
+        options: {
+          data: { name: name.trim() || 'Mon Studio Kora' },
+          emailRedirectTo: `${location.origin}/studio/`
+        }
+      })
+      setBusy(false)
+      if (r.error) {
+        setMsg(frAuthError(r.error.message))
+      } else {
+        const alreadyExists = r.data?.user && Array.isArray(r.data.user.identities) && r.data.user.identities.length === 0
+        if (alreadyExists) {
+          setSignup(false)
+          setMsg('Un compte existe déjà avec cette adresse e-mail (aucun nouvel e-mail n’est envoyé). Connectez-vous ci-dessous ou cliquez sur « Mot de passe oublié ? ».')
+        } else if (r.data?.session) {
+          onSuccess('Compte créateur prêt ! Bienvenue sur Kora Studio.')
+        } else {
+          setAwaitingConfirm(true)
+          setMsg('Un e-mail de confirmation vient d’être envoyé. Vérifiez aussi vos spams/indésirables puis cliquez sur le lien pour activer votre compte.')
+        }
+      }
+    } else {
+      const r = await db.auth.signInWithPassword({ email: cleanEmail, password: pw })
+      setBusy(false)
+      if (r.error) {
+        setMsg(frAuthError(r.error.message))
+        if (/email not confirmed/i.test(r.error.message)) setAwaitingConfirm(true)
+      } else {
+        onSuccess('Connecté à Kora Studio !')
+      }
+    }
+  }
+
+  return (
+    <form className="auth" onSubmit={submit}>
+      {signup && (
+        <label>Nom de votre chaîne / studio
+          <input className="field" value={name} onChange={e => setName(e.target.value)} placeholder="Ex. Bamako Ciné Prod" />
+        </label>
+      )}
+      <label>Adresse e-mail
+        <input className="field" type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="vous@exemple.com" />
+      </label>
+      <label>Mot de passe
+        <input className="field" type="password" required minLength={6} value={pw} onChange={e => setPw(e.target.value)} autoComplete={signup ? 'new-password' : 'current-password'} placeholder="6 caractères minimum" />
+      </label>
+      <button type="submit" className="btn p wide-btn" disabled={busy}>
+        {busy ? 'Patientez…' : signup ? 'Créer mon compte créateur' : 'Se connecter'}
+      </button>
+
+      {msg && <p className="status-box" role="status">{msg}</p>}
+
+      {awaitingConfirm && (
+        <button type="button" className="btn wide-btn" disabled={busy} onClick={resendConfirmation}>
+          Renvoyer l’e-mail de confirmation
+        </button>
+      )}
+
+      <p className="mu auth-links">
+        <button type="button" className="lnk" onClick={() => { setSignup(s => !s); setMsg(''); setAwaitingConfirm(false) }}>
+          {signup ? 'J’ai déjà un compte Kora' : 'Nouveau ? Créer un compte créateur'}
+        </button>
+        {!signup && (
+          <>
+            {' · '}
+            <button
+              type="button"
+              className="lnk"
+              onClick={async () => {
+                if (!email.trim()) { setMsg('Saisissez d’abord votre adresse e-mail.'); return }
+                setBusy(true)
+                const { error } = await db.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${location.origin}/studio/?recovery=1` })
+                setBusy(false)
+                setMsg(error ? frAuthError(error.message) : 'Si ce compte existe, un e-mail de réinitialisation vient d’être envoyé (vérifiez aussi vos spams).')
+              }}
+            >
+              Mot de passe oublié ?
+            </button>
+          </>
+        )}
+      </p>
+
+      {onBrowse && (
+        <p className="mu auth-links">
+          <button type="button" className="lnk" onClick={onBrowse}>Retourner parcourir le catalogue</button>
+        </p>
+      )}
+    </form>
+  )
+}
+
+/* ============================================================================
    ASSISTANT DE MISE EN LIGNE (4 ÉTAPES FAÇON YOUTUBE STUDIO)
    ============================================================================ */
 function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
   initial: StudioTitle | null
   channel: ChannelInfo
-  session: Session | null
-  onSaved: (t: StudioTitle, isLocal: boolean) => Promise<void>
+  session: Session
+  onSaved: (t: StudioTitle) => Promise<void>
   onCancel: () => void
 }) {
   const [step, setStep] = useState(1)
@@ -613,182 +882,161 @@ function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
   }
 
   const publish = async () => {
+    if (!sb) { setStatusMsg('Base Supabase non configurée.'); return }
     if (!title.trim()) { setStatusMsg('Donnez un titre à votre série ou film.'); setStep(2); return }
+    const hasCover = !!posterFile || (posterUrl.trim().length > 0 && posterUrl.startsWith('http'))
+    if (status === 'published' && !hasCover) {
+      setStatusMsg('Une page de couverture (affiche 2:3) est obligatoire pour publier sur Kora.')
+      setStep(1)
+      return
+    }
+
     setBusy(true); setProgressPct(15); setStatusMsg('Préparation de la mise en ligne…')
 
-    // Mode Supabase Cloud (utilisateur connecté)
-    if (sb && session) {
-      try {
-        const uid = session.user.id
-        let finalPoster = posterUrl.startsWith('http') ? posterUrl : ''
-        let finalBackdrop = backdropUrl.startsWith('http') ? backdropUrl : ''
+    try {
+      const uid = session.user.id
+      let finalPoster = posterUrl.startsWith('http') ? posterUrl : ''
+      let finalBackdrop = backdropUrl.startsWith('http') ? backdropUrl : ''
 
-        if (posterFile) {
-          setStatusMsg('Envoi de la page de couverture…'); setProgressPct(30)
-          const p = `creator/${uid}/poster-${Date.now()}-${safeName(posterFile.name)}`
-          const { error } = await sb.storage.from('posters').upload(p, posterFile, { contentType: posterFile.type })
-          if (!error) finalPoster = sb.storage.from('posters').getPublicUrl(p).data.publicUrl
-        }
-        if (backdropFile) {
-          setStatusMsg('Envoi de la bannière…'); setProgressPct(45)
-          const p = `creator/${uid}/backdrop-${Date.now()}-${safeName(backdropFile.name)}`
-          const { error } = await sb.storage.from('posters').upload(p, backdropFile, { contentType: backdropFile.type })
-          if (!error) finalBackdrop = sb.storage.from('posters').getPublicUrl(p).data.publicUrl
-        }
-
-        setStatusMsg('Enregistrement de la fiche et du synopsis…'); setProgressPct(60)
-        const payload = {
-          creator_id: uid,
-          title: title.trim(),
-          type,
-          year: +year || new Date().getFullYear(),
-          duration_min: +dur || 45,
-          country: country.trim() || 'Mali',
-          original_language: origLang || 'fr',
-          age_rating: age,
-          synopsis_short: (synShort.trim() || synLong.trim()).slice(0, 180),
-          synopsis_long: synLong.trim() || synShort.trim(),
-          status,
-          is_new: true,
-          poster_url: finalPoster || null,
-          backdrop_url: finalBackdrop || null,
-          updated_at: new Date().toISOString()
-        }
-
-        const res = initial && !initial.isLocal
-          ? await sb.from('titles').update(payload).eq('id', initial.id).select('id').single()
-          : await sb.from('titles').insert(payload).select('id').single()
-        if (res.error) throw new Error(res.error.message)
-        const tid = res.data.id as number
-
-        // Genres
-        const { data: gRows } = await sb.from('genres').select('id,name').in('name', genres)
-        await sb.from('title_genres').delete().eq('title_id', tid)
-        if (gRows?.length) await sb.from('title_genres').insert(gRows.map((g: any) => ({ title_id: tid, genre_id: g.id })))
-
-        // Réalisateur & distribution
-        const dirNames = director.split(',').map(x => x.trim()).filter(Boolean)
-        const castNames = cast.split(',').map(x => x.trim()).filter(Boolean)
-        const allPeople = [...new Set([...dirNames, ...castNames])]
-        if (allPeople.length) {
-          const { data: existingP } = await sb.from('people').select('id,name').in('name', allPeople)
-          const mapP = new Map<string, number>((existingP || []).map((x: any) => [x.name, x.id]))
-          const missing = allPeople.filter(n => !mapP.has(n))
-          if (missing.length) {
-            const { data: insP } = await sb.from('people').insert(missing.map(name => ({ name }))).select('id,name')
-            ;(insP || []).forEach((x: any) => mapP.set(x.name, x.id))
-          }
-          await sb.from('title_people').delete().eq('title_id', tid)
-          const links = [
-            ...dirNames.map(n => ({ title_id: tid, person_id: mapP.get(n)!, role: 'director', position: 0 })),
-            ...castNames.map((n, idx) => ({ title_id: tid, person_id: mapP.get(n)!, role: 'actor', position: idx + 1 }))
-          ].filter(l => l.person_id)
-          if (links.length) await sb.from('title_people').insert(links)
-        }
-
-        // Langue audio principale
-        await sb.from('title_languages').delete().eq('title_id', tid)
-        await sb.from('title_languages').insert({ title_id: tid, language_code: origLang || 'fr', kind: 'audio' })
-
-        // Droits par pays si sélectionnés
-        await sb.from('rights').delete().eq('title_id', tid)
-        if (rightsScope === 'mali') {
-          await sb.from('rights').insert({ title_id: tid, country: 'Mali', access: accessTier })
-        } else if (rightsScope === 'west_africa') {
-          await sb.from('rights').insert(['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger'].map(c => ({ title_id: tid, country: c, access: accessTier })))
-        }
-
-        // Vidéo film OU Saisons & Épisodes (avec vidéos par épisode)
-        if (type === 'series') {
-          setStatusMsg('Création des saisons et envoi des épisodes…'); setProgressPct(75)
-          const seasonNums = [...new Set(episodes.map(e => e.season))].sort((a, b) => a - b)
-          const { data: existingSeasons } = await sb.from('seasons').select('id,number').eq('title_id', tid)
-          const sMap = new Map<number, number>((existingSeasons || []).map((s: any) => [s.number, s.id]))
-          for (const sn of seasonNums) {
-            if (!sMap.has(sn)) {
-              const { data: insS } = await sb.from('seasons').insert({ title_id: tid, number: sn }).select('id,number').single()
-              if (insS) sMap.set(sn, insS.id)
-            }
-          }
-          for (let i = 0; i < episodes.length; i++) {
-            const ep = episodes[i]
-            const sid = sMap.get(ep.season)
-            if (!sid) continue
-            let epId = ep.dbId
-            if (epId) {
-              await sb.from('episodes').update({ title: ep.title, synopsis: ep.synopsis || null, duration_min: ep.duration_min, intro_end_sec: ep.intro_end_sec }).eq('id', epId)
-            } else {
-              const { data: insE } = await sb.from('episodes').insert({
-                season_id: sid, number: ep.number, title: ep.title,
-                synopsis: ep.synopsis || null, duration_min: ep.duration_min, intro_end_sec: ep.intro_end_sec
-              }).select('id').single()
-              epId = insE?.id
-            }
-            if (epId && ep.file) {
-              setStatusMsg(`Envoi vidéo S${ep.season}E${ep.number} (${ep.file.name})…`)
-              const vPath = `creator/${uid}/ep-${epId}-${Date.now()}-${safeName(ep.file.name)}`
-              const { error: ve } = await sb.storage.from('videos').upload(vPath, ep.file, { contentType: ep.file.type })
-              if (!ve) {
-                await sb.from('video_assets').delete().eq('episode_id', epId)
-                await sb.from('video_assets').insert({ episode_id: epId, storage_path: vPath, size_bytes: ep.file.size, mime: ep.file.type, status: 'ready' })
-              }
-            }
-            setProgressPct(75 + Math.round(((i + 1) / Math.max(1, episodes.length)) * 22))
-          }
-        } else if (mainVideoFile) {
-          setStatusMsg(`Envoi de la vidéo ${mainVideoFile.name}…`); setProgressPct(80)
-          const vPath = `creator/${uid}/vid-${tid}-${Date.now()}-${safeName(mainVideoFile.name)}`
-          const { error: ve } = await sb.storage.from('videos').upload(vPath, mainVideoFile, { contentType: mainVideoFile.type })
-          if (ve) throw new Error(/exceed|size|large/i.test(ve.message) ? 'Vidéo supérieure à 50 Mo (limite du plan Supabase gratuit).' : ve.message)
-          await sb.from('video_assets').delete().eq('title_id', tid)
-          await sb.from('video_assets').insert({ title_id: tid, storage_path: vPath, size_bytes: mainVideoFile.size, mime: mainVideoFile.type, status: 'ready' })
-        }
-
-        setProgressPct(100)
-        setBusy(false)
-        await onSaved({
-          id: tid, title: title.trim(), type, year: +year, country, original_language: origLang, age_rating: age,
-          duration_min: +dur, synopsis_short: synShort, synopsis_long: synLong, director, cast, genres, status,
-          poster_url: finalPoster, backdrop_url: finalBackdrop, episodes, rights_scope: rightsScope, access_tier: accessTier,
-          created_at: new Date().toISOString(), channelName: channel.channel_name
-        }, false)
-        return
-      } catch (err: any) {
-        setBusy(false)
-        setStatusMsg(err?.message || 'Erreur lors de la mise en ligne.')
-        return
+      if (posterFile) {
+        setStatusMsg('Envoi de la page de couverture…'); setProgressPct(30)
+        const p = `creator/${uid}/poster-${Date.now()}-${safeName(posterFile.name)}`
+        const { error } = await sb.storage.from('posters').upload(p, posterFile, { contentType: posterFile.type })
+        if (error) throw new Error(`Échec envoi couverture : ${error.message}`)
+        finalPoster = sb.storage.from('posters').getPublicUrl(p).data.publicUrl
       }
-    }
+      if (backdropFile) {
+        setStatusMsg('Envoi de la bannière…'); setProgressPct(45)
+        const p = `creator/${uid}/backdrop-${Date.now()}-${safeName(backdropFile.name)}`
+        const { error } = await sb.storage.from('posters').upload(p, backdropFile, { contentType: backdropFile.type })
+        if (error) throw new Error(`Échec envoi bannière : ${error.message}`)
+        finalBackdrop = sb.storage.from('posters').getPublicUrl(p).data.publicUrl
+      }
 
-    // Mode Créateur local (si non connecté à Supabase)
-    setProgressPct(100)
-    await new Promise(r => setTimeout(r, 250))
-    const savedLocal: StudioTitle = {
-      id: initial?.id || (1000 + Math.floor(Math.random() * 90000)),
-      title: title.trim(),
-      type,
-      year: +year || new Date().getFullYear(),
-      country,
-      original_language: origLang,
-      age_rating: age,
-      duration_min: +dur || 45,
-      synopsis_short: (synShort.trim() || synLong.trim()).slice(0, 180),
-      synopsis_long: synLong.trim() || synShort.trim(),
-      director: director.trim() || channel.channel_name,
-      cast,
-      genres,
-      status,
-      poster_url: posterUrl,
-      backdrop_url: backdropUrl,
-      episodes: type === 'series' ? episodes.map(({ file, videoPreviewUrl, ...rest }) => ({ ...rest, hasUploadedVideo: !!file || rest.hasUploadedVideo })) : [],
-      rights_scope: rightsScope,
-      access_tier: accessTier,
-      created_at: initial?.created_at || new Date().toISOString(),
-      channelName: channel.channel_name,
-      isLocal: true
+      if (status === 'published' && !finalPoster) {
+        throw new Error('La page de couverture est obligatoire pour publier.')
+      }
+
+      setStatusMsg('Enregistrement de la fiche et du synopsis…'); setProgressPct(60)
+      const payload = {
+        creator_id: uid,
+        title: title.trim(),
+        type,
+        year: +year || new Date().getFullYear(),
+        duration_min: +dur || 45,
+        country: country.trim() || 'Mali',
+        original_language: origLang || 'fr',
+        age_rating: age,
+        synopsis_short: (synShort.trim() || synLong.trim()).slice(0, 180),
+        synopsis_long: synLong.trim() || synShort.trim(),
+        status,
+        is_new: true,
+        poster_url: finalPoster || null,
+        backdrop_url: finalBackdrop || null,
+        updated_at: new Date().toISOString()
+      }
+
+      const res = initial
+        ? await sb.from('titles').update(payload).eq('id', initial.id).select('id').single()
+        : await sb.from('titles').insert(payload).select('id').single()
+      if (res.error) throw new Error(res.error.message)
+      const tid = res.data.id as number
+
+      // Genres
+      const { data: gRows } = await sb.from('genres').select('id,name').in('name', genres)
+      await sb.from('title_genres').delete().eq('title_id', tid)
+      if (gRows?.length) await sb.from('title_genres').insert(gRows.map((g: any) => ({ title_id: tid, genre_id: g.id })))
+
+      // Réalisateur & distribution
+      const dirNames = director.split(',').map(x => x.trim()).filter(Boolean)
+      const castNames = cast.split(',').map(x => x.trim()).filter(Boolean)
+      const allPeople = [...new Set([...dirNames, ...castNames])]
+      if (allPeople.length) {
+        const { data: existingP } = await sb.from('people').select('id,name').in('name', allPeople)
+        const mapP = new Map<string, number>((existingP || []).map((x: any) => [x.name, x.id]))
+        const missing = allPeople.filter(n => !mapP.has(n))
+        if (missing.length) {
+          const { data: insP } = await sb.from('people').insert(missing.map(name => ({ name }))).select('id,name')
+          ;(insP || []).forEach((x: any) => mapP.set(x.name, x.id))
+        }
+        await sb.from('title_people').delete().eq('title_id', tid)
+        const links = [
+          ...dirNames.map(n => ({ title_id: tid, person_id: mapP.get(n)!, role: 'director', position: 0 })),
+          ...castNames.map((n, idx) => ({ title_id: tid, person_id: mapP.get(n)!, role: 'actor', position: idx + 1 }))
+        ].filter(l => l.person_id)
+        if (links.length) await sb.from('title_people').insert(links)
+      }
+
+      // Langue audio principale
+      await sb.from('title_languages').delete().eq('title_id', tid)
+      await sb.from('title_languages').insert({ title_id: tid, language_code: origLang || 'fr', kind: 'audio' })
+
+      // Droits par pays si sélectionnés
+      await sb.from('rights').delete().eq('title_id', tid)
+      if (rightsScope === 'mali') {
+        await sb.from('rights').insert({ title_id: tid, country: 'Mali', access: accessTier })
+      } else if (rightsScope === 'west_africa') {
+        await sb.from('rights').insert(['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger'].map(c => ({ title_id: tid, country: c, access: accessTier })))
+      }
+
+      // Vidéo film OU Saisons & Épisodes (avec vidéos par épisode)
+      if (type === 'series') {
+        setStatusMsg('Création des saisons et envoi des épisodes…'); setProgressPct(75)
+        const seasonNums = [...new Set(episodes.map(e => e.season))].sort((a, b) => a - b)
+        const { data: existingSeasons } = await sb.from('seasons').select('id,number').eq('title_id', tid)
+        const sMap = new Map<number, number>((existingSeasons || []).map((s: any) => [s.number, s.id]))
+        for (const sn of seasonNums) {
+          if (!sMap.has(sn)) {
+            const { data: insS } = await sb.from('seasons').insert({ title_id: tid, number: sn }).select('id,number').single()
+            if (insS) sMap.set(sn, insS.id)
+          }
+        }
+        for (let i = 0; i < episodes.length; i++) {
+          const ep = episodes[i]
+          const sid = sMap.get(ep.season)
+          if (!sid) continue
+          let epId = ep.dbId
+          if (epId) {
+            await sb.from('episodes').update({ title: ep.title, synopsis: ep.synopsis || null, duration_min: ep.duration_min, intro_end_sec: ep.intro_end_sec }).eq('id', epId)
+          } else {
+            const { data: insE } = await sb.from('episodes').insert({
+              season_id: sid, number: ep.number, title: ep.title,
+              synopsis: ep.synopsis || null, duration_min: ep.duration_min, intro_end_sec: ep.intro_end_sec
+            }).select('id').single()
+            epId = insE?.id
+          }
+          if (epId && ep.file) {
+            setStatusMsg(`Envoi vidéo S${ep.season}E${ep.number} (${ep.file.name})…`)
+            const vPath = `creator/${uid}/ep-${epId}-${Date.now()}-${safeName(ep.file.name)}`
+            const { error: ve } = await sb.storage.from('videos').upload(vPath, ep.file, { contentType: ep.file.type })
+            if (!ve) {
+              await sb.from('video_assets').delete().eq('episode_id', epId)
+              await sb.from('video_assets').insert({ episode_id: epId, storage_path: vPath, size_bytes: ep.file.size, mime: ep.file.type, status: 'ready' })
+            }
+          }
+          setProgressPct(75 + Math.round(((i + 1) / Math.max(1, episodes.length)) * 22))
+        }
+      } else if (mainVideoFile) {
+        setStatusMsg(`Envoi de la vidéo ${mainVideoFile.name}…`); setProgressPct(80)
+        const vPath = `creator/${uid}/vid-${tid}-${Date.now()}-${safeName(mainVideoFile.name)}`
+        const { error: ve } = await sb.storage.from('videos').upload(vPath, mainVideoFile, { contentType: mainVideoFile.type })
+        if (ve) throw new Error(/exceed|size|large/i.test(ve.message) ? 'Vidéo supérieure à 50 Mo (limite du plan Supabase gratuit).' : ve.message)
+        await sb.from('video_assets').delete().eq('title_id', tid)
+        await sb.from('video_assets').insert({ title_id: tid, storage_path: vPath, size_bytes: mainVideoFile.size, mime: mainVideoFile.type, status: 'ready' })
+      }
+
+      setProgressPct(100)
+      setBusy(false)
+      await onSaved({
+        id: tid, title: title.trim(), type, year: +year, country, original_language: origLang, age_rating: age,
+        duration_min: +dur, synopsis_short: synShort, synopsis_long: synLong, director, cast, genres, status,
+        poster_url: finalPoster, backdrop_url: finalBackdrop, episodes, rights_scope: rightsScope, access_tier: accessTier,
+        created_at: new Date().toISOString(), channelName: channel.channel_name
+      })
+    } catch (err: any) {
+      setBusy(false)
+      setStatusMsg(err?.message || 'Erreur lors de la mise en ligne.')
     }
-    setBusy(false)
-    await onSaved(savedLocal, true)
   }
 
   return (
@@ -796,7 +1044,7 @@ function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
       <div className="page-head">
         <div>
           <h1>{initial ? `Modifier « ${initial.title} »` : 'Mettre en ligne sur Kora Studio'}</h1>
-          <p className="mu">Importez vos vidéos, votre page de couverture, votre synopsis et vos épisodes étape par étape.</p>
+          <p className="mu">Importez vos vidéos, votre page de couverture (obligatoire pour publier), votre synopsis et vos épisodes étape par étape.</p>
         </div>
         <button type="button" className="btn" onClick={onCancel}>Annuler</button>
       </div>
@@ -846,7 +1094,7 @@ function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
               >
                 <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => handleCoverFile(e.target.files?.[0], 'poster')} aria-label="Téléverser la page de couverture" />
                 <div className="drop-icon"><Icon n="image" s={24} /></div>
-                <strong>Glissez-déposez votre page de couverture (Affiche 2:3)</strong>
+                <strong>Glissez-déposez votre page de couverture (Affiche 2:3 · obligatoire)</strong>
                 <span className="mu">JPG, PNG ou WebP · 5 Mo max · cliquez ou déposez ici</span>
                 {posterFile && <span className="pill-ok">{posterFile.name}</span>}
               </div>
@@ -863,8 +1111,10 @@ function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
                 {backdropFile && <span className="pill-ok">{backdropFile.name}</span>}
               </div>
 
+              {!busy && statusMsg && <p className="err-msg" role="alert">{statusMsg}</p>}
+
               <div className="btns">
-                <button type="button" className="btn p" onClick={() => setStep(2)}>Continuer vers Détails & Synopsis →</button>
+                <button type="button" className="btn p" onClick={() => { setStatusMsg(''); setStep(2) }}>Continuer vers Détails & Synopsis →</button>
               </div>
             </>
           )}
@@ -900,9 +1150,10 @@ function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
                   ))}
                 </div>
               </div>
+              {!busy && statusMsg && <p className="err-msg" role="alert">{statusMsg}</p>}
               <div className="btns">
                 <button type="button" className="btn" onClick={() => setStep(1)}>← Retour</button>
-                <button type="button" className="btn p" onClick={() => setStep(3)}>
+                <button type="button" className="btn p" onClick={() => { setStatusMsg(''); setStep(3) }}>
                   Continuer vers {type === 'series' ? 'Saisons & Épisodes' : 'la vidéo'} →
                 </button>
               </div>
@@ -1053,6 +1304,7 @@ function UploadWizard({ initial, channel, session, onSaved, onCancel }: {
               <div style={{ padding: 14 }}>
                 <span className="pill-accent">{TYPE_LABELS[type]}</span>
                 <p className="serif" style={{ fontSize: '1.2rem', marginTop: 10 }}>{title || 'Titre de votre série'}</p>
+                <small className="mu">Couverture obligatoire</small>
               </div>
             )}
           </div>

@@ -24,8 +24,8 @@ const fmtDate = (iso: string) => {
 }
 
 export function ListBtn({ id }: { id: number }) {
-  const { profile, toggleList } = useApp()
-  const on = profile.list.includes(id)
+  const { profile, toggleList, session } = useApp()
+  const on = !!session && profile.list.includes(id)
   return (
     <button type="button" className={'btn' + (on ? ' active-btn' : '')} onClick={() => toggleList(id)}>
       <Icon n={on ? 'check' : 'plus'} s={18} />
@@ -69,13 +69,13 @@ const HOME_FILTERS = [
 ] as const
 
 export function Home() {
-  const { cat, items, byId, profile, isPremium, role } = useApp()
+  const { cat, items, byId, profile, isPremium, role, session } = useApp()
   const [filter, setFilter] = useState<string>('all')
   const [heroIdx, setHeroIdx] = useState(0)
   const [paused, setPaused] = useState(false)
 
   const heroes = useMemo(() => {
-    const raw = (cat?.heroes?.length ? cat.heroes : [cat?.hero || 1]).map(byId).filter(Boolean) as Item[]
+    const raw = (cat?.heroes?.length ? cat.heroes : [cat?.hero || 0]).map(byId).filter(Boolean) as Item[]
     return raw.length ? raw : items.slice(0, 4)
   }, [cat, items, byId])
 
@@ -85,11 +85,41 @@ export function Home() {
     return () => clearInterval(h)
   }, [heroes.length, paused])
 
-  if (!cat || !items.length) return <p className="page mu">Chargement du catalogue Kora…</p>
+  if (!cat) return <p className="page mu">Chargement du catalogue Kora…</p>
+
+  if (!items.length) {
+    return (
+      <>
+        <header className="empty-catalog-hero">
+          <div className="empty-catalog-inner">
+            <BrandLogo height={44} />
+            <span className="pill-accent">Cinéma & Séries d’Afrique</span>
+            <h1>Le catalogue Kora est prêt pour vos premières séries</h1>
+            <p className="mu">
+              Les œuvres fictives sans couverture ont été retirées. Ajoutez vos propres séries avec page de couverture, synopsis et épisodes depuis l’Espace Administrateur ou Kora Studio.
+            </p>
+            <div className="btns" style={{ justifyContent: 'center' }}>
+              {!session ? (
+                <a className="btn p" href="#/connexion"><Icon n="user" s={18} />Se connecter / Créer un compte</a>
+              ) : (
+                <>
+                  {role === 'admin' && (
+                    <a className="btn p" href="#/admin?t=titles&id=new&type=series"><Icon n="plus" s={18} />Ajouter une série (Admin)</a>
+                  )}
+                  <a className={'btn' + (role !== 'admin' ? ' p' : '')} href="/studio/"><Icon n="studio" s={18} />Publier sur Kora Studio</a>
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+        <Footer />
+      </>
+    )
+  }
 
   const hero = heroes[heroIdx % heroes.length] || items[0]
-  const cont = Object.keys(profile.hist).map(Number).filter(id => byId(id) && profile.hist[id] > 10)
-  const src = byId(cont[cont.length - 1] || 0)
+  const cont = session ? Object.keys(profile.hist).map(Number).filter(id => byId(id) && profile.hist[id] > 10) : []
+  const src = session ? byId(cont[cont.length - 1] || 0) : undefined
 
   // Moteur de recommandation pondéré (genres, réalisateurs et pays appréciés)
   const seen = new Set([...cont, ...profile.list])
@@ -141,11 +171,11 @@ export function Home() {
           </p>
           <p className="clip">{hero.synopsis}</p>
           <div className="btns">
-            <a className="btn p" href={`#/lire/${hero.id}`}>
-              <Icon n="play" s={18} />
-              {heroSaved > 30 ? `Reprendre (${fmtShort(heroSaved)})` : 'Lire'}
+            <a className="btn p" href={session ? `#/lire/${hero.id}` : '#/connexion'}>
+              <Icon n={session ? 'play' : 'lock'} s={18} />
+              {!session ? 'Se connecter pour lire' : heroSaved > 30 ? `Reprendre (${fmtShort(heroSaved)})` : 'Lire'}
             </a>
-            <ListBtn id={hero.id} />
+            {session && <ListBtn id={hero.id} />}
             <a className="btn" href={`#/titre/${hero.id}`}><Icon n="info" s={18} />Plus d’infos</a>
           </div>
         </div>
@@ -522,7 +552,7 @@ export function MyList() {
    FICHE DÉTAILLÉE — Film, Série, Documentaire, Court-métrage
    ============================================================================ */
 export function Detail({ id }: { id: number }) {
-  const { byId, items, profile, rate, toast, submitReport } = useApp()
+  const { byId, items, profile, rate, toast, submitReport, session, requireAuth } = useApp()
   const it = byId(id)
   const [season, setSeason] = useState(1)
   const [reportOpen, setReportOpen] = useState(false)
@@ -597,19 +627,25 @@ export function Detail({ id }: { id: number }) {
         )}
 
         <div className="btns">
-          <a className="btn p" href={it.seasons ? `#/lire/${id}?s=${season}&e=1` : `#/lire/${id}`}>
-            <Icon n="play" s={18} />
-            {savedPos > 30 ? 'Reprendre la lecture' : 'Lire'}
+          <a className="btn p" href={session ? (it.seasons ? `#/lire/${id}?s=${season}&e=1` : `#/lire/${id}`) : '#/connexion'}>
+            <Icon n={session ? 'play' : 'lock'} s={18} />
+            {!session ? 'Se connecter pour lire' : savedPos > 30 ? 'Reprendre la lecture' : 'Lire'}
           </a>
-          <a className="btn" href={`#/lire/${id}?t=1`}><Icon n="film" s={18} />Bande-annonce</a>
+          <a className="btn" href={session ? `#/lire/${id}?t=1` : '#/connexion'}><Icon n="film" s={18} />Bande-annonce</a>
           <ListBtn id={id} />
           <button type="button" className="btn" onClick={share}><Icon n="share" s={18} />Partager</button>
-          <button type="button" className="btn" onClick={() => setReportOpen(true)}><Icon n="flag" s={18} />Signaler</button>
+          <button type="button" className="btn" onClick={() => { if (requireAuth('signaler un contenu')) setReportOpen(true) }}><Icon n="flag" s={18} />Signaler</button>
         </div>
+
+        {!session && (
+          <p className="mu small-note">
+            Mode visiteur : vous parcourez le catalogue en lecture seule. <a className="lnk" href="#/connexion">Connectez-vous</a> pour regarder, noter ou ajouter à votre liste.
+          </p>
+        )}
 
         <div className="chips" role="group" aria-label="Évaluer ce titre">
           {[['like', 'J’aime'], ['love', 'J’adore'], ['no', 'Pas pour moi']].map(([k, t]) => (
-            <button key={k} type="button" className={'chip' + (profile.rate?.[id] === k ? ' on' : '')} onClick={() => rate(id, k)}>
+            <button key={k} type="button" className={'chip' + (session && profile.rate?.[id] === k ? ' on' : '')} onClick={() => rate(id, k)}>
               {t}
             </button>
           ))}
@@ -664,12 +700,12 @@ export function Detail({ id }: { id: number }) {
                 const epPct = epSec ? Math.min(100, Math.round((epSec / (e.duration_min * 60)) * 100)) : 0
                 return (
                   <li key={e.number}>
-                    <a href={`#/lire/${id}?s=${season}&e=${e.number}`}>
+                    <a href={session ? `#/lire/${id}?s=${season}&e=${e.number}` : '#/connexion'}>
                       <span className="ep-num">{e.number}</span>
                       <div className="ep-body">
                         <strong>{e.title}</strong>
                         {e.synopsis && <p className="mu">{e.synopsis}</p>}
-                        {epPct > 0 && <div className="ep-prog"><span style={{ width: `${epPct}%` }} /></div>}
+                        {session && epPct > 0 && <div className="ep-prog"><span style={{ width: `${epPct}%` }} /></div>}
                       </div>
                       <small className="mu">{e.duration_min} min</small>
                     </a>

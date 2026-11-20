@@ -499,6 +499,9 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
 
   const save = async () => {
     if (!f.title.trim()) return setMsg('Le titre est obligatoire.')
+    if (f.status === 'published' && !pendingPoster && !f.poster_url.trim()) {
+      return setMsg('Une page de couverture (affiche 2:3) est obligatoire pour publier un contenu sur Kora.')
+    }
     setBusy(true); setMsg('')
     const row = {
       title: f.title.trim(), type: f.type, year: f.year ? +f.year : null, duration_min: f.duration_min ? +f.duration_min : null,

@@ -3,7 +3,7 @@ import { Provider, useApp } from './store'
 import { BrandLogo, Icon, ProfileAvatar, ToastHost } from './ui'
 import { Categories, Detail, Home, MyList, NotFound, Profile, Search, Settings, Subscription } from './pages'
 import { Privacy, Terms } from './legal'
-import { Auth } from './auth'
+import { Auth, AuthRequiredGate } from './auth'
 
 const Admin = lazy(() => import('./admin').then(m => ({ default: m.Admin })))
 const Player = lazy(() => import('./player').then(m => ({ default: m.Player })))
@@ -19,7 +19,14 @@ function useRoute() {
   return { seg: p.split('/').filter(Boolean), q: new URLSearchParams(q) }
 }
 
-const NAV: [string, string, string][] = [
+const PUBLIC_NAV: [string, string, string][] = [
+  ['', 'Accueil', 'home'],
+  ['recherche', 'Recherche', 'search'],
+  ['categories', 'Explorer', 'grid'],
+  ['connexion', 'Connexion', 'user']
+]
+
+const MEMBER_NAV: [string, string, string][] = [
   ['', 'Accueil', 'home'],
   ['recherche', 'Recherche', 'search'],
   ['categories', 'Explorer', 'grid'],
@@ -52,8 +59,9 @@ function Consent() {
 
 function Sidebar() {
   const { seg } = useRoute()
-  const { profile, role, unreadCount, isPremium, st, setTheme } = useApp()
+  const { session, profile, role, unreadCount, isPremium, st, setTheme } = useApp()
   const cur = seg[0] || ''
+  const nav = session ? MEMBER_NAV : PUBLIC_NAV
 
   const cycleTheme = () => {
     setTheme(st.theme === 'dark' ? 'black' : st.theme === 'black' ? 'light' : 'dark')
@@ -66,27 +74,34 @@ function Sidebar() {
       </a>
 
       <div className="nav-links">
-        {NAV.map(([k, t, i]) => (
+        {nav.map(([k, t, i]) => (
           <a key={k} href={`#/${k}`} className={cur === k ? 'on' : ''} aria-current={cur === k ? 'page' : undefined}>
             <Icon n={i} s={20} />
             <span>{t}</span>
-            {k === 'profil' && unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
+            {session && k === 'profil' && unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
           </a>
         ))}
-        <a href="#/parametres" className={'nav-extra' + (cur === 'parametres' ? ' on' : '')} aria-current={cur === 'parametres' ? 'page' : undefined}>
-          <Icon n="gear" s={20} />
-          <span>Paramètres</span>
-          {unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
-        </a>
-        <a href="#/abonnement" className={'nav-extra' + (cur === 'abonnement' ? ' on' : '')} aria-current={cur === 'abonnement' ? 'page' : undefined}>
-          <Icon n="crown" s={20} />
-          <span>{isPremium ? 'Mon offre' : 'Premium'}</span>
-        </a>
+
+        {session && (
+          <>
+            <a href="#/parametres" className={'nav-extra' + (cur === 'parametres' ? ' on' : '')} aria-current={cur === 'parametres' ? 'page' : undefined}>
+              <Icon n="gear" s={20} />
+              <span>Paramètres</span>
+              {unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
+            </a>
+            <a href="#/abonnement" className={'nav-extra' + (cur === 'abonnement' ? ' on' : '')} aria-current={cur === 'abonnement' ? 'page' : undefined}>
+              <Icon n="crown" s={20} />
+              <span>{isPremium ? 'Mon offre' : 'Premium'}</span>
+            </a>
+          </>
+        )}
+
         <a href="/studio/" className="nav-extra">
           <Icon n="studio" s={20} />
           <span>Kora Studio</span>
         </a>
-        {(role === 'admin' || role === 'moderator') && (
+
+        {session && (role === 'admin' || role === 'moderator') && (
           <a href="#/admin" className={'nav-extra' + (cur === 'admin' ? ' on' : '')} aria-current={cur === 'admin' ? 'page' : undefined}>
             <Icon n="shield" s={20} />
             <span>{role === 'admin' ? 'Admin' : 'Modération'}</span>
@@ -95,13 +110,19 @@ function Sidebar() {
       </div>
 
       <div className="nav-foot">
-        <a className="nav-profile" href="#/profil" aria-label={`Profil actif : ${profile.name}`}>
-          <ProfileAvatar profile={profile} size={32} />
-          <div className="nav-prof-txt">
-            <strong>{profile.name}</strong>
-            <small className="mu">{profile.kid ? 'Enfant' : isPremium ? 'Premium' : 'Gratuit'}</small>
-          </div>
-        </a>
+        {session ? (
+          <a className="nav-profile" href="#/profil" aria-label={`Profil actif : ${profile.name}`}>
+            <ProfileAvatar profile={profile} size={32} />
+            <div className="nav-prof-txt">
+              <strong>{profile.name}</strong>
+              <small className="mu">{profile.kid ? 'Enfant' : isPremium ? 'Premium' : 'Gratuit'}</small>
+            </div>
+          </a>
+        ) : (
+          <a className="btn p" style={{ flex: 1, minHeight: 38, padding: '6px 12px', fontSize: '0.88rem' }} href="#/connexion">
+            Se connecter
+          </a>
+        )}
         <button
           type="button"
           className="icon-btn"
@@ -118,22 +139,44 @@ function Sidebar() {
 
 function Routes() {
   const { seg, q } = useRoute()
+  const { session, authReady } = useApp()
   if (location.pathname !== '/' && location.pathname !== '/index.html') return <NotFound />
   const [a, b, c] = seg
+
+  const protectedRoute = (title: string, desc: string, node: JSX.Element) => {
+    if (!authReady) return <p className="page mu">Vérification de votre session…</p>
+    if (!session) return <AuthRequiredGate title={title} desc={desc} />
+    return node
+  }
+
   switch (a) {
     case undefined: return <Home />
     case 'recherche': return <Search q0={q.get('q') || ''} />
     case 'categories': return <Categories kind={b} val={c} />
-    case 'ma-liste': return <MyList />
-    case 'profil': return <Profile />
-    case 'parametres': return <Settings />
     case 'titre': return <Detail id={+b} />
-    case 'lire': return <Suspense fallback={<p className="page mu">Chargement du lecteur…</p>}><Player key={b + location.hash} id={+b} q={q} /></Suspense>
-    case 'abonnement': return <Subscription />
-    case 'connexion': return <Auth />
-    case 'admin': return <Suspense fallback={<p className="page mu">Chargement de l’espace administrateur…</p>}><Admin q={q} /></Suspense>
+    case 'connexion': return <Auth recovery={q.has('recovery')} />
     case 'confidentialite': return <Privacy />
     case 'cgu': return <Terms />
+    case 'ma-liste':
+      return protectedRoute('Ma bibliothèque', 'Connectez-vous pour enregistrer des œuvres dans votre liste et suivre vos lectures.', <MyList />)
+    case 'profil':
+      return protectedRoute('Mon profil & foyer', 'Connectez-vous pour accéder à vos profils du foyer et à votre historique.', <Profile />)
+    case 'parametres':
+      return protectedRoute('Paramètres du compte', 'Connectez-vous pour personnaliser vos préférences de lecture, appareils et sécurité.', <Settings />)
+    case 'abonnement':
+      return protectedRoute('Abonnement Kora', 'Connectez-vous pour activer ou gérer votre formule Kora.', <Subscription />)
+    case 'lire':
+      return protectedRoute(
+        'Connexion requise pour lire',
+        'Vous pouvez parcourir librement le catalogue. Connectez-vous pour lancer la lecture des séries et films.',
+        <Suspense fallback={<p className="page mu">Chargement du lecteur…</p>}><Player key={b + location.hash} id={+b} q={q} /></Suspense>
+      )
+    case 'admin':
+      return protectedRoute(
+        'Espace administrateur',
+        'Connectez-vous avec un compte administrateur ou modérateur pour gérer le catalogue.',
+        <Suspense fallback={<p className="page mu">Chargement de l’espace administrateur…</p>}><Admin q={q} /></Suspense>
+      )
     default: return <NotFound />
   }
 }

@@ -57,7 +57,7 @@ export type Profile = {
   kid: boolean
   list: number[]
   hist: Record<number, number>
-  epHist: Record<string, number> // key: `${titleId}:${season}:${ep}` -> sec
+  epHist: Record<string, number>
   rate: Record<number, string>
   pinHash?: string
 }
@@ -120,7 +120,7 @@ export type State = {
   accountCountry: string
 }
 
-const KEY = 'kora-state-v2'
+const KEY = 'kora-state-v3'
 const DEVICE_KEY = 'kora-device-id'
 
 export const AVATARS = [
@@ -211,7 +211,7 @@ function detectDevice(): DeviceInfo {
   } catch { /* ignoré */ }
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
   const os = /Windows/i.test(ua) ? 'Windows' : /Mac OS/i.test(ua) ? 'macOS' : /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iOS' : /Linux/i.test(ua) ? 'Linux' : 'Appareil web'
-  const br = /Edg\//i.test(ua) ? 'Edge' : /Chrome\//i.test(ua) ? 'Chrome' : /Firefox\//i.test(ua) ? 'Firefox' : /Safari\//i.test(ua) ? 'Safari' : 'Navigateur'
+  const br = /Edg\//i.test(ua) ? 'Edge' : /Chrome\//i.test(ua) ? 'Chrome' : /Firefox\//i.test(ua) ? 'Firefox' : /Safari/i.test(ua) ? 'Safari' : 'Navigateur'
   return { id, name: `${br} sur ${os}`, platform: os, lastSeen: new Date().toISOString(), current: true }
 }
 
@@ -224,31 +224,9 @@ export async function hashPin(pin: string): Promise<string> {
   return 'raw:' + clean
 }
 
-const defaultNotifications: AppNotification[] = [
-  {
-    id: 'n-welcome',
-    title: 'Bienvenue sur Kora',
-    body: 'Découvrez Le Griot de Ségou, Paris-Kayes et les grands classiques restaurés du cinéma africain.',
-    kind: 'release',
-    link: '#/titre/1',
-    read: false,
-    date: new Date().toISOString()
-  },
-  {
-    id: 'n-studio',
-    title: 'Nouveau : Kora Studio pour les créateurs',
-    body: 'Réalisateurs et producteurs : mettez en ligne vos propres séries et films directement sur Kora.',
-    kind: 'info',
-    link: '/studio/',
-    read: false,
-    date: new Date(Date.now() - 86400000).toISOString()
-  }
-]
-
 const init: State = {
   profiles: [
-    { id: 'p1', name: 'Moi', avatar: 'gold', kid: false, list: [1, 20], hist: { 1: 2400, 5: 1100 }, epHist: {}, rate: { 1: 'love' } },
-    { id: 'p2', name: 'Enfants', avatar: 'emerald', kid: true, list: [17], hist: {}, epHist: {}, rate: {} }
+    { id: 'p1', name: 'Moi', avatar: 'gold', kid: false, list: [], hist: {}, epHist: {}, rate: {} }
   ],
   cur: 'p1',
   plan: 'free',
@@ -257,7 +235,7 @@ const init: State = {
   periodEnd: new Date(Date.now() + 86400000 * 30).toISOString(),
   invoices: [],
   devices: [detectDevice()],
-  notifications: defaultNotifications,
+  notifications: [],
   recentSearches: [],
   theme: 'dark',
   subLang: 'Français',
@@ -269,29 +247,20 @@ const init: State = {
   accountCountry: 'Mali'
 }
 
-function loadState(): State {
+function loadPrefs(): State {
   try {
-    const raw = localStorage.getItem(KEY) || localStorage.getItem('kora-state')
+    const raw = localStorage.getItem(KEY)
     if (!raw) return init
     const parsed = JSON.parse(raw)
-    const profiles: Profile[] = (parsed.profiles || init.profiles).map((p: any, idx: number) => ({
-      id: p.id || `p${idx + 1}`,
-      name: p.name || 'Profil',
-      avatar: p.avatar || AVATARS[idx % AVATARS.length].id,
-      kid: !!p.kid,
-      list: Array.isArray(p.list) ? p.list : [],
-      hist: p.hist || {},
-      epHist: p.epHist || {},
-      rate: p.rate || {},
-      pinHash: p.pinHash || (p.pin ? 'raw:' + p.pin : undefined)
-    }))
     return {
       ...init,
-      ...parsed,
-      plan: parsed.plan || (parsed.premium ? 'premium' : 'free'),
-      profiles,
-      devices: Array.isArray(parsed.devices) && parsed.devices.length ? parsed.devices : [detectDevice()],
-      notifications: Array.isArray(parsed.notifications) ? parsed.notifications : defaultNotifications
+      theme: parsed.theme || 'dark',
+      subLang: parsed.subLang || 'Français',
+      audioLang: parsed.audioLang || 'Original',
+      subSize: parsed.subSize || 'normal',
+      defaultQuality: parsed.defaultQuality || 'Auto',
+      autoNext: parsed.autoNext ?? true,
+      recentSearches: Array.isArray(parsed.recentSearches) ? parsed.recentSearches : []
     }
   } catch {
     return init
@@ -300,43 +269,7 @@ function loadState(): State {
 
 const TYPES: Record<string, Item['type']> = { film: 'film', series: 'serie', doc: 'doc', short: 'court' }
 
-function loadLocalStudioItems(): Item[] {
-  try {
-    const raw = localStorage.getItem('kora-studio-items')
-    if (!raw) return []
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter((x: any) => x && x.status === 'published').map((x: any) => ({
-      id: Number(x.id),
-      title: x.title || 'Sans titre',
-      type: TYPES[x.type] || x.type || 'serie',
-      year: Number(x.year) || new Date().getFullYear(),
-      country: x.country || 'Mali',
-      langs: Array.isArray(x.langs) && x.langs.length ? x.langs : ['Français'],
-      subtitles: ['Français', 'English'],
-      genres: Array.isArray(x.genres) && x.genres.length ? x.genres : ['Drame'],
-      age: x.age || 'Tous',
-      dur: Number(x.dur) || 45,
-      seasons: x.seasons || (x.episodesBySeason ? Object.keys(x.episodesBySeason).length : undefined),
-      episodesBySeason: x.episodesBySeason,
-      director: x.director || x.channelName || 'Créateur Kora',
-      cast: Array.isArray(x.cast) ? x.cast : [],
-      synopsis: x.synopsis || '',
-      poster: x.poster || undefined,
-      backdrop: x.backdrop || undefined,
-      quality: 'HD',
-      badge: x.channelName ? `Studio · ${x.channelName}` : 'Kora Studio',
-      isNew: true
-    }))
-  } catch {
-    return []
-  }
-}
-
-function buildCatalogFromItems(rawItems: Item[]): Catalog {
-  const localItems = loadLocalStudioItems()
-  const existingIds = new Set(rawItems.map(i => i.id))
-  const items = [...localItems.filter(l => !existingIds.has(l.id)), ...rawItems]
+function buildCatalogFromItems(items: Item[]): Catalog {
   const ids = (f: (i: Item) => boolean) => items.filter(f).map(i => i.id)
   const flag = (k: 'isTrending' | 'isNew' | 'isExclusive'): number[] => items.filter(t => t[k]).map(t => t.id)
   const trending = flag('isTrending')
@@ -363,63 +296,60 @@ function buildCatalogFromItems(rawItems: Item[]): Catalog {
   }
 }
 
+// Charge uniquement les œuvres publiées qui possèdent une vraie page de couverture (poster_url)
 async function loadCatalog(): Promise<Catalog> {
-  let fallback: Catalog | null = null
-  const getFallback = async () => {
-    if (!fallback) fallback = await fetch('/api/catalog').then(r => r.json()).catch(() => ({ items: [], hero: 0, rows: {} }))
-    return fallback!
-  }
-
   if (sb) {
     const { data, error } = await sb.from('titles')
-      .select('id,type,title,synopsis_long,year,duration_min,country,age_rating,poster_url,backdrop_url,trailer_url,is_trending,is_new,is_exclusive,title_genres(genres(name)),title_people(role,position,people(name)),title_languages(kind,languages(name)),seasons(number,episodes(id,number,title,synopsis,duration_min,intro_end_sec))')
+      .select('id,type,title,synopsis_short,synopsis_long,year,duration_min,country,age_rating,poster_url,backdrop_url,trailer_url,is_trending,is_new,is_exclusive,title_genres(genres(name)),title_people(role,position,people(name)),title_languages(kind,languages(name)),seasons(number,episodes(id,number,title,synopsis,duration_min,intro_end_sec))')
       .eq('status', 'published')
-      .order('id')
-    if (!error && data?.length) {
-      const fb = await getFallback()
-      const fbMap = new Map(fb.items.map(i => [i.id, i]))
-      const items: Item[] = data.map((t: any) => {
-        const meta = fbMap.get(t.id)
-        const episodesBySeason: Record<number, Episode[]> = {}
-        for (const s of (t.seasons || [])) {
-          const eps = (s.episodes || []).slice().sort((a: any, b: any) => a.number - b.number)
-          if (eps.length) episodesBySeason[s.number] = eps
-        }
-        const langs = (t.title_languages || []).filter((x: any) => x.kind === 'audio' && x.languages?.name).map((x: any) => x.languages.name)
-        const subtitles = (t.title_languages || []).filter((x: any) => x.kind === 'subtitle' && x.languages?.name).map((x: any) => x.languages.name)
-        return {
-          id: t.id,
-          title: t.title,
-          type: TYPES[t.type] || 'film',
-          year: t.year || 2024,
-          country: t.country || 'Mali',
-          age: t.age_rating || 'Tous',
-          dur: t.duration_min || meta?.dur || 90,
-          synopsis: t.synopsis_long || meta?.synopsis || '',
-          poster: t.poster_url || undefined,
-          backdrop: t.backdrop_url || undefined,
-          trailer: t.trailer_url || undefined,
-          genres: (t.title_genres || []).map((x: any) => x.genres?.name).filter(Boolean),
-          langs: langs.length ? langs : (meta?.langs || ['Français']),
-          subtitles: subtitles.length ? subtitles : (meta?.subtitles || ['Français', 'English']),
-          director: (t.title_people || []).find((x: any) => x.role === 'director')?.people?.name || meta?.director || '',
-          cast: (t.title_people || []).filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people?.name).filter(Boolean),
-          seasons: (t.seasons || []).length || meta?.seasons || undefined,
-          episodesBySeason: Object.keys(episodesBySeason).length ? episodesBySeason : meta?.episodesBySeason,
-          quality: meta?.quality || (t.is_exclusive || t.year >= 2024 ? '4K' : 'HD'),
-          hdr: meta?.hdr ?? !!t.is_exclusive,
-          audioDesc: meta?.audioDesc ?? false,
-          badge: meta?.badge || (t.is_exclusive ? 'Original Kora' : t.is_new ? 'Nouveauté' : undefined),
-          isTrending: !!t.is_trending,
-          isNew: !!t.is_new,
-          isExclusive: !!t.is_exclusive
-        }
-      })
+      .not('poster_url', 'is', null)
+      .neq('poster_url', '')
+      .order('id', { ascending: false })
+    if (!error) {
+      const items: Item[] = (data || [])
+        .filter((t: any) => typeof t.poster_url === 'string' && t.poster_url.trim().length > 0)
+        .map((t: any) => {
+          const episodesBySeason: Record<number, Episode[]> = {}
+          for (const s of (t.seasons || [])) {
+            const eps = (s.episodes || []).slice().sort((a: any, b: any) => a.number - b.number)
+            if (eps.length) episodesBySeason[s.number] = eps
+          }
+          const langs = (t.title_languages || []).filter((x: any) => x.kind === 'audio' && x.languages?.name).map((x: any) => x.languages.name)
+          const subtitles = (t.title_languages || []).filter((x: any) => x.kind === 'subtitle' && x.languages?.name).map((x: any) => x.languages.name)
+          return {
+            id: t.id,
+            title: t.title,
+            type: TYPES[t.type] || 'serie',
+            year: t.year || new Date().getFullYear(),
+            country: t.country || 'Mali',
+            age: t.age_rating || 'Tous',
+            dur: t.duration_min || 45,
+            synopsis: t.synopsis_long || t.synopsis_short || '',
+            poster: t.poster_url,
+            backdrop: t.backdrop_url || undefined,
+            trailer: t.trailer_url || undefined,
+            genres: (t.title_genres || []).map((x: any) => x.genres?.name).filter(Boolean),
+            langs: langs.length ? langs : ['Français'],
+            subtitles: subtitles.length ? subtitles : ['Français', 'English'],
+            director: (t.title_people || []).find((x: any) => x.role === 'director')?.people?.name || '',
+            cast: (t.title_people || []).filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people?.name).filter(Boolean),
+            seasons: (t.seasons || []).length || undefined,
+            episodesBySeason: Object.keys(episodesBySeason).length ? episodesBySeason : undefined,
+            quality: t.is_exclusive ? '4K' : 'HD',
+            hdr: !!t.is_exclusive,
+            audioDesc: false,
+            badge: t.is_exclusive ? 'Original Kora' : t.is_new ? 'Nouveauté' : undefined,
+            isTrending: !!t.is_trending,
+            isNew: !!t.is_new,
+            isExclusive: !!t.is_exclusive
+          }
+        })
       return buildCatalogFromItems(items)
     }
   }
-  const fb = await getFallback()
-  return buildCatalogFromItems(fb.items || [])
+  const fb = await fetch('/api/catalog').then(r => r.json()).catch(() => ({ items: [] }))
+  const withCovers: Item[] = (fb.items || []).filter((i: any) => typeof i.poster === 'string' && i.poster.trim().length > 0)
+  return buildCatalogFromItems(withCovers)
 }
 
 type Ctx = {
@@ -429,12 +359,14 @@ type Ctx = {
   items: Item[]
   byId: (id: number) => Item | undefined
   session: Session | null
+  authReady: boolean
   role: string
   isPremium: boolean
   unreadCount: number
   toasts: Toast[]
   toast: (msg: string, kind?: Toast['kind']) => void
   dismissToast: (id: number) => void
+  requireAuth: (actionLabel?: string) => boolean
   signOut: () => void
   reloadCatalog: () => void
   toggleList: (id: number) => void
@@ -462,9 +394,10 @@ const C = createContext<Ctx>(null!)
 export const useApp = () => useContext(C)
 
 export function Provider({ children }: { children: ReactNode }) {
-  const [st, setSt] = useState<State>(loadState)
+  const [st, setSt] = useState<State>(loadPrefs)
   const [cat, setCat] = useState<Catalog | null>(null)
   const [session, setSession] = useState<Session | null>(null)
+  const [authReady, setAuthReady] = useState(!sb)
   const [role, setRole] = useState('user')
   const [toasts, setToasts] = useState<Toast[]>([])
 
@@ -478,6 +411,13 @@ export function Provider({ children }: { children: ReactNode }) {
     setToasts(list => list.filter(t => t.id !== id))
   }, [])
 
+  const requireAuth = useCallback((actionLabel?: string) => {
+    if (session) return true
+    toast(actionLabel ? `Connectez-vous pour ${actionLabel}.` : 'Connectez-vous pour accéder à cette fonctionnalité.', 'info')
+    location.hash = '#/connexion'
+    return false
+  }, [session, toast])
+
   // Appliquer le thème de marque sur <html> et <meta name="theme-color">
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', st.theme)
@@ -488,8 +428,18 @@ export function Provider({ children }: { children: ReactNode }) {
   }, [st.theme])
 
   useEffect(() => {
-    try { localStorage.setItem(KEY, JSON.stringify(st)) } catch { /* stockage indisponible */ }
-  }, [st])
+    try {
+      localStorage.setItem(KEY, JSON.stringify({
+        theme: st.theme,
+        subLang: st.subLang,
+        audioLang: st.audioLang,
+        subSize: st.subSize,
+        defaultQuality: st.defaultQuality,
+        autoNext: st.autoNext,
+        recentSearches: st.recentSearches
+      }))
+    } catch { /* stockage indisponible */ }
+  }, [st.theme, st.subLang, st.audioLang, st.subSize, st.defaultQuality, st.autoNext, st.recentSearches])
 
   const reloadCatalog = useCallback(() => {
     loadCatalog().then(setCat).catch(() => setCat({ items: [], hero: 0, rows: {} }))
@@ -498,11 +448,14 @@ export function Provider({ children }: { children: ReactNode }) {
   useEffect(() => { reloadCatalog() }, [reloadCatalog])
 
   useEffect(() => {
-    if (!sb) return
-    sb.auth.getSession().then(({ data }) => setSession(data.session))
+    if (!sb) { setAuthReady(true); return }
+    sb.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true) })
     const { data } = sb.auth.onAuthStateChange((ev, s) => {
       setSession(s)
-      if (ev === 'SIGNED_OUT') {
+      setAuthReady(true)
+      if (ev === 'PASSWORD_RECOVERY') {
+        location.hash = '#/connexion?recovery=1'
+      } else if (ev === 'SIGNED_OUT') {
         setRole('user')
         setSt(s0 => ({ ...init, theme: s0.theme }))
       }
@@ -554,7 +507,7 @@ export function Provider({ children }: { children: ReactNode }) {
 
       const mappedNotifs: AppNotification[] = (notif as any)?.data?.length
         ? (notif as any).data.map((n: any) => ({ id: String(n.id), title: n.title, body: n.body, kind: n.kind || 'info', link: n.link || undefined, read: !!n.read_at, date: n.created_at }))
-        : defaultNotifications
+        : []
 
       setSt(s => ({
         ...s,
@@ -563,7 +516,7 @@ export function Provider({ children }: { children: ReactNode }) {
         plan: dbPlan,
         cancelAtPeriodEnd: !!sub.data?.[0]?.cancel_at_period_end,
         periodEnd: sub.data?.[0]?.current_period_end || s.periodEnd,
-        invoices: mappedInvoices.length ? mappedInvoices : s.invoices,
+        invoices: mappedInvoices,
         devices: mappedDevices,
         notifications: mappedNotifs,
         ...(prof.data?.length ? {
@@ -592,9 +545,9 @@ export function Provider({ children }: { children: ReactNode }) {
   const rid = sb && session && /^[0-9a-f-]{36}$/.test(profile.id) ? profile.id : ''
   const upd = (f: (p: Profile) => Profile) =>
     setSt(s => ({ ...s, profiles: s.profiles.map(p => p.id === s.cur ? f(p) : p) }))
-  const items = (cat?.items || []).filter(i => !profile.kid || i.age === 'Tous' || i.age === '7+')
-  const isPremium = st.plan === 'premium' || st.plan === 'family'
-  const unreadCount = st.notifications.filter(n => !n.read).length
+  const items = (cat?.items || []).filter(i => !session || !profile.kid || i.age === 'Tous' || i.age === '7+')
+  const isPremium = !!session && (st.plan === 'premium' || st.plan === 'family')
+  const unreadCount = session ? st.notifications.filter(n => !n.read).length : 0
 
   const v: Ctx = {
     st,
@@ -603,18 +556,22 @@ export function Provider({ children }: { children: ReactNode }) {
     items,
     byId: id => items.find(i => i.id === id),
     session,
+    authReady,
     role,
     isPremium,
     unreadCount,
     toasts,
     toast,
     dismissToast,
+    requireAuth,
     reloadCatalog,
     signOut: () => {
       sb?.auth.signOut()
       toast('Vous êtes déconnecté.', 'info')
+      location.hash = '#/'
     },
     toggleList: id => {
+      if (!requireAuth('ajouter un titre à Ma liste')) return
       const on = profile.list.includes(id)
       upd(p => ({ ...p, list: on ? p.list.filter(x => x !== id) : [...p.list, id] }))
       toast(on ? 'Retiré de Ma liste' : 'Ajouté à Ma liste', 'ok')
@@ -626,6 +583,7 @@ export function Provider({ children }: { children: ReactNode }) {
       }
     },
     progress: (id, s, season, episode) => {
+      if (!session) return
       const sec = Math.max(0, Math.floor(s))
       upd(p => ({
         ...p,
@@ -643,6 +601,7 @@ export function Provider({ children }: { children: ReactNode }) {
       }
     },
     removeHistory: id => {
+      if (!requireAuth('modifier votre historique')) return
       upd(p => {
         const next = { ...p.hist }
         delete next[id]
@@ -652,11 +611,13 @@ export function Provider({ children }: { children: ReactNode }) {
       toast('Retiré de l’historique.', 'info')
     },
     clearHistory: () => {
+      if (!requireAuth('effacer votre historique')) return
       upd(p => ({ ...p, hist: {}, epHist: {} }))
       if (rid) sb!.from('watch_progress').delete().eq('profile_id', rid).then(() => {}, () => {})
       toast('Historique effacé.', 'info')
     },
     rate: (id, r) => {
+      if (!requireAuth('évaluer un titre')) return
       const val = profile.rate?.[id] === r ? '' : r
       upd(p => ({ ...p, rate: { ...p.rate, [id]: val } }))
       if (val) toast(val === 'love' ? 'Noté « J’adore »' : val === 'like' ? 'Noté « J’aime »' : 'Nous proposerons moins ce genre', 'ok')
@@ -668,6 +629,7 @@ export function Provider({ children }: { children: ReactNode }) {
       }
     },
     addProfile: async (name, kid, avatar, pin) => {
+      if (!requireAuth('créer un profil')) return
       const maxProfiles = PLANS.find(p => p.id === st.plan)?.profiles || 2
       if (st.profiles.length >= maxProfiles) {
         toast(`Votre formule permet ${maxProfiles} profils maximum. Passez à Premium ou Famille.`, 'err')
@@ -683,11 +645,11 @@ export function Provider({ children }: { children: ReactNode }) {
           toast(`Profil « ${name} » créé.`, 'ok')
           return
         }
+        toast(error?.message || 'Impossible de créer le profil.', 'err')
       }
-      setSt(s => ({ ...s, profiles: [...s.profiles, { id: 'p' + Date.now(), name, avatar, kid, pinHash, list: [], hist: {}, epHist: {}, rate: {} }] }))
-      toast(`Profil « ${name} » créé.`, 'ok')
     },
     updateProfile: async (id, patch) => {
+      if (!requireAuth('modifier un profil')) return
       const pinHash = patch.pin === null ? undefined : patch.pin ? await hashPin(patch.pin) : undefined
       setSt(s => ({
         ...s,
@@ -710,6 +672,7 @@ export function Provider({ children }: { children: ReactNode }) {
       toast('Profil mis à jour.', 'ok')
     },
     deleteProfile: async id => {
+      if (!requireAuth('supprimer un profil')) return
       if (st.profiles.length <= 1) {
         toast('Vous devez conserver au moins un profil.', 'err')
         return
@@ -724,6 +687,7 @@ export function Provider({ children }: { children: ReactNode }) {
       toast('Profil supprimé.', 'info')
     },
     selectProfile: id => {
+      if (!requireAuth('changer de profil')) return
       setSt(s => ({ ...s, cur: id }))
       const p = st.profiles.find(x => x.id === id)
       if (p) toast(`Profil actif : ${p.name}`, 'ok')
@@ -736,6 +700,7 @@ export function Provider({ children }: { children: ReactNode }) {
       return hashed === p.pinHash
     },
     subscribePlan: async (planId, billing, provider, customerRef = '') => {
+      if (!requireAuth('gérer votre abonnement')) return { ok: false, error: 'Connexion requise.' }
       const plan = PLANS.find(p => p.id === planId)!
       const amount = billing === 'year' ? plan.priceYear : plan.priceMonth
       let ref = `SIM-${Date.now().toString(36).toUpperCase()}`
@@ -773,20 +738,7 @@ export function Provider({ children }: { children: ReactNode }) {
         billing,
         cancelAtPeriodEnd: false,
         periodEnd,
-        invoices: inv ? [inv, ...s.invoices] : s.invoices,
-        notifications: [{
-          id: 'n-sub-' + Date.now(),
-          title: planId === 'free' ? 'Retour à la formule Gratuit' : `Bienvenue dans Kora ${plan.name}`,
-          body: planId === 'free'
-            ? 'Votre compte est repassé sur la formule gratuite.'
-            : IS_BILLING_SIMULATION
-              ? `Votre formule ${plan.name} est activée gratuitement (mode simulation).`
-              : `Votre formule ${plan.name} (${amount.toLocaleString('fr-FR')} FCFA) est active sans publicité.`,
-          kind: 'account',
-          link: '#/abonnement',
-          read: false,
-          date: new Date().toISOString()
-        }, ...s.notifications]
+        invoices: inv ? [inv, ...s.invoices] : s.invoices
       }))
       toast(
         planId === 'free'
@@ -799,10 +751,12 @@ export function Provider({ children }: { children: ReactNode }) {
       return { ok: true }
     },
     cancelSubscription: cancel => {
+      if (!requireAuth('gérer votre abonnement')) return
       setSt(s => ({ ...s, cancelAtPeriodEnd: cancel }))
       toast(cancel ? 'Résiliation programmée en fin de période.' : 'Abonnement réactivé.', 'info')
     },
     updateAccount: async (name, country) => {
+      if (!requireAuth('modifier votre compte')) return
       setSt(s => ({ ...s, accountName: name, accountCountry: country }))
       if (sb && session) {
         const { error } = await sb.from('accounts').update({ name, country }).eq('id', session.user.id)
@@ -811,6 +765,7 @@ export function Provider({ children }: { children: ReactNode }) {
       toast('Informations du compte enregistrées.', 'ok')
     },
     revokeDevice: async deviceId => {
+      if (!requireAuth('gérer vos appareils')) return
       setSt(s => ({ ...s, devices: s.devices.filter(d => d.id !== deviceId) }))
       if (sb && session && /^[0-9a-f-]{36}$/.test(deviceId)) {
         await sb.from('devices').update({ revoked_at: new Date().toISOString() }).eq('id', deviceId)
@@ -818,6 +773,7 @@ export function Provider({ children }: { children: ReactNode }) {
       toast('Appareil déconnecté.', 'info')
     },
     markNotificationsRead: id => {
+      if (!session) return
       setSt(s => ({
         ...s,
         notifications: s.notifications.map(n => (!id || n.id === id) ? { ...n, read: true } : n)
@@ -833,6 +789,7 @@ export function Provider({ children }: { children: ReactNode }) {
       setSt(s => ({ ...s, recentSearches: [clean, ...s.recentSearches.filter(x => x.toLowerCase() !== clean.toLowerCase())].slice(0, 6) }))
     },
     submitReport: async (titleId, reason) => {
+      if (!requireAuth('signaler un contenu')) return false
       const clean = reason.trim()
       if (!clean) return false
       if (sb && session) {
@@ -843,7 +800,10 @@ export function Provider({ children }: { children: ReactNode }) {
       return true
     },
     setTheme: theme => setSt(s => ({ ...s, theme })),
-    set: p => setSt(s => ({ ...s, ...p }))
+    set: p => {
+      if (!session) return
+      setSt(s => ({ ...s, ...p }))
+    }
   }
 
   return <C.Provider value={v}>{children}</C.Provider>

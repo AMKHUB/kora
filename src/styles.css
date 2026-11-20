@@ -602,6 +602,27 @@ small { font-size: 0.8125rem; }
 .form textarea { resize: vertical; }
 .auth-links { text-align: center; font-size: 0.9rem; }
 .status-box { padding: 10px 12px; border-radius: var(--rad-sm); background: var(--s2); border: 1px solid var(--line); font-size: 0.9rem; }
+.auth-gate {
+  display: grid; justify-items: center; text-align: center; gap: 14px;
+  max-width: 480px; padding: 34px 28px;
+}
+.gate-icon {
+  width: 58px; height: 58px; border-radius: 50%;
+  display: grid; place-items: center;
+  background: var(--s2); color: var(--primary);
+  border: 1px solid rgba(242, 195, 52, 0.35);
+}
+
+.empty-catalog-hero {
+  min-height: 68vh; display: grid; place-items: center; padding: 48px 20px;
+  background: radial-gradient(75% 75% at 50% 25%, rgba(242, 195, 52, 0.14), transparent 70%);
+  border-bottom: 1px solid var(--line);
+}
+.empty-catalog-inner {
+  max-width: 620px; display: grid; justify-items: center; text-align: center; gap: 16px;
+}
+.empty-catalog-inner h1 { font-size: clamp(1.9rem, 4.4vw, 2.9rem); line-height: 1.12; }
+.empty-catalog-inner p { max-width: 52ch; font-size: 1rem; }
 
 /* Admin */
 .thumb { width: 124px; aspect-ratio: 2/3; object-fit: cover; border-radius: var(--rad-card); border: 1px solid var(--line); }
