@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { AVATARS, Episode, Item, PLANS, PlanId, Profile as ProfileType, ThemeMode, useApp } from './store'
 import { BrandLogo, Card, Icon, Meta, Modal, PinModal, Poster, ProfileAvatar, Row } from './ui'
 import { AccountBox, AccountSummary } from './auth'
-import { IS_BILLING_SIMULATION } from './billing'
 
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 const hay = (i: Item) => norm([i.title, i.director, i.country, i.type, i.synopsis, ...i.cast, ...i.langs, ...i.genres].join(' '))
@@ -1100,7 +1099,7 @@ const PROVIDERS = [
 ] as const
 
 export function Subscription() {
-  const { st, subscribePlan, cancelSubscription } = useApp()
+  const { st, subscribePlan, cancelSubscription, billingSimulation } = useApp()
   const [billing, setBilling] = useState<'month' | 'year'>(st.billing || 'month')
   const [checkoutPlan, setCheckoutPlan] = useState<PlanId | null>(null)
   const [provider, setProvider] = useState<string>(PROVIDERS[0].id)
@@ -1135,11 +1134,11 @@ export function Subscription() {
   return (
     <div className="page sub-page">
       <div className="sub-hero">
-        <span className="pill-accent">{IS_BILLING_SIMULATION ? 'Mode simulation · Activation gratuite' : 'Offres Kora'}</span>
+        <span className="pill-accent">{billingSimulation ? 'Mode simulation · Activation gratuite' : 'Offres Kora'}</span>
         <h1>Choisissez votre formule</h1>
         <p className="mu">
-          {IS_BILLING_SIMULATION
-            ? 'En phase de test, vous pouvez activer Premium ou Famille gratuitement en 1 clic. En production (VITE_BILLING_MODE=live), le paiement réel devient obligatoire.'
+          {billingSimulation
+            ? 'En phase de test, vous pouvez activer Premium ou Famille gratuitement en 1 clic. En production (BILLING_MODE=live), le paiement réel devient obligatoire.'
             : 'Sans engagement. Paiement sécurisé par Orange Money, Moov Money, Wave ou carte bancaire.'}
         </p>
 
@@ -1151,11 +1150,11 @@ export function Subscription() {
         </div>
       </div>
 
-      {IS_BILLING_SIMULATION && (
+      {billingSimulation && (
         <div className="sim-banner" role="note">
           <Icon n="sparkles" s={18} />
           <div>
-            <strong>Mode simulation actif</strong> — Activez n’importe quelle formule sans payer pour tester Kora sans publicité et en 4K. Pour obliger le paiement lors du lancement final, définissez <code>VITE_BILLING_MODE=live</code> sur Vercel.
+            <strong>Mode simulation actif</strong> — Activez n’importe quelle formule sans payer pour tester Kora sans publicité et en 4K. Pour obliger le paiement lors du lancement final, définissez <code>BILLING_MODE=live</code> côté serveur sur Vercel.
           </div>
         </div>
       )}
@@ -1193,7 +1192,7 @@ export function Subscription() {
                 <button type="button" className="btn wide-btn" onClick={() => subscribePlan('free', 'month', 'Aucun')}>
                   Revenir à Gratuit
                 </button>
-              ) : IS_BILLING_SIMULATION ? (
+              ) : billingSimulation ? (
                 <div className="plan-actions">
                   <button type="button" className="btn p wide-btn" disabled={busy} onClick={() => activateFreeSimulation(plan.id)}>
                     Activer {plan.name} gratuitement (simulation)
@@ -1293,7 +1292,7 @@ export function Subscription() {
             {payErr && <p className="err-msg" role="alert">{payErr}</p>}
 
             <p className="mu small-note">
-              {IS_BILLING_SIMULATION
+              {billingSimulation
                 ? 'Mode simulation : aucun débit réel n’est effectué.'
                 : 'Mode production : paiement vérifié côté serveur obligatoire avant activation.'}
             </p>

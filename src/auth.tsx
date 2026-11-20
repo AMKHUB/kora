@@ -1,19 +1,23 @@
 import { useState } from 'react'
-import { sb } from './supabase'
+import { apiPost } from './api'
 import { useApp } from './store'
 import { BrandLogo, Icon } from './ui'
 
 const COUNTRIES = ['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger', 'Bénin', 'Togo', 'Cameroun', 'Ghana', 'Nigeria', 'Afrique du Sud', 'France', 'Belgique', 'Canada', 'États-Unis', 'Autre']
 
-const fr = (m: string) =>
-  /invalid login/i.test(m) ? 'E-mail ou mot de passe incorrect.'
-    : /email not confirmed/i.test(m) ? 'Votre adresse e-mail n’est pas encore confirmée. Vérifiez vos spams ou cliquez sur « Renvoyer l’e-mail de confirmation ».'
-      : /already registered|user_repeated_signup/i.test(m) ? 'Cet e-mail possède déjà un compte Kora. Connectez-vous ou réinitialisez votre mot de passe.'
-        : /password should be/i.test(m) ? 'Mot de passe trop court (6 caractères minimum).'
-          : /rate limit|security purposes|only request this after/i.test(m) ? 'Trop d’e-mails envoyés récemment (limite anti-spam Supabase). Patientez quelques minutes puis réessayez.'
-            : /provider|sms/i.test(m) ? 'L’envoi de SMS n’est pas encore activé sur ce serveur. Utilisez la connexion par e-mail.'
-              : /otp|token/i.test(m) ? 'Code incorrect ou expiré.'
-                : m
+export function GoogleAuthButton({ app = 'kora', label = 'Continuer avec Google' }: { app?: 'kora' | 'studio'; label?: string }) {
+  return (
+    <a className="btn google-btn wide-btn" href={`/api/auth?action=google&app=${app}`}>
+      <svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="#4285F4" d="M23.49 12.27c0-.79-.07-1.54-.2-2.27H12v4.3h6.45a5.52 5.52 0 0 1-2.4 3.62v3h3.88c2.27-2.09 3.56-5.17 3.56-8.65z" />
+        <path fill="#34A853" d="M12 24c3.24 0 5.95-1.07 7.93-2.91l-3.88-3c-1.07.72-2.45 1.15-4.05 1.15-3.12 0-5.76-2.11-6.7-4.94H1.3v3.1A12 12 0 0 0 12 24z" />
+        <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6H1.3a12 12 0 0 0 0 10.8l4-3.1z" />
+        <path fill="#EA4335" d="M12 4.75c1.76 0 3.34.61 4.58 1.8l3.44-3.44C17.95 1.19 15.24 0 12 0A12 12 0 0 0 1.3 6.6l4 3.1c.94-2.83 3.58-4.95 6.7-4.95z" />
+      </svg>
+      <span>{label}</span>
+    </a>
+  )
+}
 
 export function AuthRequiredGate({ title = 'Connexion requise', desc = 'Vous pouvez parcourir le catalogue librement. Connectez-vous pour regarder des œuvres, gérer votre liste, votre profil ou votre abonnement.' }: {
   title?: string
@@ -35,8 +39,221 @@ export function AuthRequiredGate({ title = 'Connexion requise', desc = 'Vous pou
   )
 }
 
-export function Auth({ recovery = false }: { recovery?: boolean }) {
+/* ============================================================================
+   PAGE DÉDIÉE : CONFIRMATION D'E-MAIL (#/confirmation)
+   ============================================================================ */
+export function EmailConfirmPage({ q }: { q: URLSearchParams }) {
+  const { session, toast } = useApp()
+  const status = q.get('status') || ''
+  const urlMsg = q.get('msg') || ''
+  const [email, setEmail] = useState(q.get('email') || '')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(urlMsg)
+
+  const resend = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email.trim()) { setMsg('Saisissez votre adresse e-mail.'); return }
+    setBusy(true); setMsg('')
+    const r = await apiPost('/api/auth?action=resend', { email: email.trim(), app: 'kora' })
+    setBusy(false)
+    if (r.ok) {
+      setMsg(r.data.message || 'E-mail de confirmation renvoyé ! Vérifiez aussi vos spams.')
+      toast('E-mail de confirmation renvoyé.', 'ok')
+    } else {
+      setMsg(r.data.error || 'Impossible de renvoyer l’e-mail.')
+    }
+  }
+
+  if (status === 'ok') {
+    return (
+      <div className="page auth-wrap">
+        <div className="auth-card auth-gate">
+          <div className="gate-icon ok-icon"><Icon n="check" s={28} /></div>
+          <BrandLogo height={36} />
+          <h1>Adresse e-mail confirmée</h1>
+          <p className="mu">
+            Votre compte Kora est désormais activé{session?.user.email ? ` (${session.user.email})` : ''}. Vous pouvez accéder au streaming, à votre liste et à Kora Studio.
+          </p>
+          <div className="btns" style={{ justifyContent: 'center' }}>
+            <a className="btn p" href="#/"><Icon n="play" s={18} />Accéder à Kora</a>
+            <a className="btn" href="/studio/"><Icon n="studio" s={18} />Ouvrir Kora Studio</a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="page auth-wrap">
+      <div className="auth-card auth">
+        <div className="auth-head" style={{ justifyItems: 'center', textAlign: 'center' }}>
+          <div className="gate-icon"><Icon n={status === 'error' ? 'alert' : 'bell'} s={26} /></div>
+          <BrandLogo height={36} />
+          <h1>{status === 'error' ? 'Lien de confirmation expiré' : 'Confirmez votre adresse e-mail'}</h1>
+          <p className="mu">
+            {status === 'error'
+              ? 'Ce lien de confirmation n’est plus valide ou a déjà été utilisé. Renvoyez un nouvel e-mail ci-dessous.'
+              : email
+                ? `Un e-mail d’activation a été envoyé à ${email}. Cliquez sur le lien reçu (pensez à vérifier vos spams / indésirables).`
+                : 'Consultez votre boîte de réception et cliquez sur le lien de confirmation Kora.'}
+          </p>
+        </div>
+
+        {msg && <p className="status-box" role="status">{msg}</p>}
+
+        <form className="auth" onSubmit={resend}>
+          <label>Adresse e-mail
+            <input
+              className="field"
+              type="email"
+              required
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="vous@exemple.com"
+              autoComplete="email"
+            />
+          </label>
+          <button type="submit" className="btn p wide-btn" disabled={busy}>
+            {busy ? 'Envoi en cours…' : 'Renvoyer l’e-mail de confirmation'}
+          </button>
+        </form>
+
+        <p className="mu auth-links">
+          <a className="lnk" href="#/connexion">Déjà confirmé ? Se connecter</a>
+          {' · '}
+          <a className="lnk" href="#/reinitialisation">Mot de passe oublié ?</a>
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/* ============================================================================
+   PAGE DÉDIÉE : RÉINITIALISATION DE MOT DE PASSE (#/reinitialisation)
+   ============================================================================ */
+export function ResetPasswordPage({ q }: { q: URLSearchParams }) {
   const { toast } = useApp()
+  const step = q.get('step') || ''
+  const status = q.get('status') || ''
+  const [email, setEmail] = useState(q.get('email') || '')
+  const [pw, setPw] = useState('')
+  const [pw2, setPw2] = useState('')
+  const [done, setDone] = useState(false)
+  const [sent, setSent] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState(q.get('msg') || '')
+
+  if (done) {
+    return (
+      <div className="page auth-wrap">
+        <div className="auth-card auth-gate">
+          <div className="gate-icon ok-icon"><Icon n="check" s={28} /></div>
+          <BrandLogo height={36} />
+          <h1>Mot de passe mis à jour</h1>
+          <p className="mu">Votre nouveau mot de passe est enregistré. Vous êtes connecté à votre compte Kora.</p>
+          <div className="btns" style={{ justifyContent: 'center' }}>
+            <a className="btn p" href="#/">Accéder à Kora</a>
+            <a className="btn" href="#/profil">Mon profil</a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Étape 2 : définition du nouveau mot de passe après clic sur le lien reçu par e-mail
+  if (step === 'new') {
+    const saveNewPw = async (e: React.FormEvent) => {
+      e.preventDefault()
+      if (pw.length < 6) { setMsg('Le mot de passe doit contenir au moins 6 caractères.'); return }
+      if (pw !== pw2) { setMsg('Les deux mots de passe ne correspondent pas.'); return }
+      setBusy(true); setMsg('')
+      const r = await apiPost('/api/auth?action=update-password', { password: pw })
+      setBusy(false)
+      if (!r.ok) setMsg(r.data.error || 'Impossible de mettre à jour le mot de passe.')
+      else {
+        toast('Nouveau mot de passe enregistré !', 'ok')
+        setDone(true)
+      }
+    }
+
+    return (
+      <div className="page auth-wrap">
+        <form className="auth-card auth" onSubmit={saveNewPw}>
+          <div className="auth-head" style={{ justifyItems: 'center', textAlign: 'center' }}>
+            <div className="gate-icon"><Icon n="lock" s={26} /></div>
+            <BrandLogo height={36} />
+            <h1>Nouveau mot de passe</h1>
+            <p className="mu">Choisissez un nouveau mot de passe sécurisé pour votre compte Kora.</p>
+          </div>
+          <label>Nouveau mot de passe
+            <input className="field" type="password" required minLength={6} value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" placeholder="6 caractères minimum" />
+          </label>
+          <label>Confirmer le mot de passe
+            <input className="field" type="password" required minLength={6} value={pw2} onChange={e => setPw2(e.target.value)} autoComplete="new-password" placeholder="Retapez votre mot de passe" />
+          </label>
+          <button type="submit" className="btn p wide-btn" disabled={busy}>
+            {busy ? 'Enregistrement…' : 'Enregistrer le nouveau mot de passe'}
+          </button>
+          {msg && <p className="status-box" role="status">{msg}</p>}
+        </form>
+      </div>
+    )
+  }
+
+  // Étape 1 : demande d'e-mail de réinitialisation
+  const requestReset = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!email.trim()) { setMsg('Saisissez votre adresse e-mail.'); return }
+    setBusy(true); setMsg('')
+    const r = await apiPost('/api/auth?action=forgot', { email: email.trim(), app: 'kora' })
+    setBusy(false)
+    if (!r.ok) {
+      setMsg(r.data.error || 'Impossible d’envoyer l’e-mail de réinitialisation.')
+    } else {
+      setSent(true)
+      setMsg(r.data.message || 'Un e-mail de réinitialisation vient d’être envoyé.')
+    }
+  }
+
+  return (
+    <div className="page auth-wrap">
+      <form className="auth-card auth" onSubmit={requestReset}>
+        <div className="auth-head" style={{ justifyItems: 'center', textAlign: 'center' }}>
+          <div className="gate-icon"><Icon n={status === 'error' ? 'alert' : 'lock'} s={26} /></div>
+          <BrandLogo height={36} />
+          <h1>Réinitialiser mon mot de passe</h1>
+          <p className="mu">
+            {status === 'error'
+              ? 'Votre lien de réinitialisation a expiré ou a déjà été utilisé. Demandez-en un nouveau ci-dessous.'
+              : 'Indiquez l’adresse e-mail de votre compte Kora pour recevoir un lien sécurisé de réinitialisation.'}
+          </p>
+        </div>
+
+        <label>Adresse e-mail
+          <input className="field" type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="vous@exemple.com" />
+        </label>
+
+        <button type="submit" className="btn p wide-btn" disabled={busy}>
+          {busy ? 'Envoi en cours…' : sent ? 'Renvoyer le lien de réinitialisation' : 'Envoyer le lien de réinitialisation'}
+        </button>
+
+        {msg && <p className="status-box" role="status">{msg}</p>}
+
+        <p className="mu auth-links">
+          <a className="lnk" href="#/connexion">← Retour à la connexion</a>
+          {' · '}
+          <a className="lnk" href="#/">Parcourir le catalogue</a>
+        </p>
+      </form>
+    </div>
+  )
+}
+
+/* ============================================================================
+   CONNEXION & INSCRIPTION (#/connexion) — Google Auth + E-mail + Téléphone
+   ============================================================================ */
+export function Auth({ q }: { q: URLSearchParams }) {
+  const { authConfigured, refreshSession, toast } = useApp()
   const [mode, setMode] = useState<'email' | 'phone'>('email')
   const [signup, setSignup] = useState(false)
   const [name, setName] = useState('')
@@ -46,118 +263,75 @@ export function Auth({ recovery = false }: { recovery?: boolean }) {
   const [code, setCode] = useState('')
   const [sent, setSent] = useState(false)
   const [awaitingConfirm, setAwaitingConfirm] = useState(false)
-  const [msg, setMsg] = useState('')
+  const [msg, setMsg] = useState(q.get('error') || '')
   const [busy, setBusy] = useState(false)
 
-  if (!sb) {
+  if (!authConfigured) {
     return (
       <div className="page auth-wrap">
         <div className="auth-card">
           <BrandLogo height={36} />
           <h1>Authentification non configurée</h1>
-          <p className="mu">Configurez VITE_SUPABASE_URL et VITE_SUPABASE_PUBLISHABLE_KEY pour activer la connexion.</p>
+          <p className="mu">Le serveur d’authentification n’est pas encore configuré sur cette instance.</p>
           <a className="btn p" href="#/">Retour au catalogue</a>
         </div>
       </div>
     )
   }
 
-  const db = sb
-  const tel = phone.replace(/\s/g, '')
-
-  // Mode réinitialisation de mot de passe (après clic sur le lien reçu par e-mail)
-  if (recovery) {
-    const saveNewPw = async (e: React.FormEvent) => {
-      e.preventDefault()
-      if (pw.length < 6) { setMsg('Le mot de passe doit contenir au moins 6 caractères.'); return }
-      setBusy(true); setMsg('')
-      const { error } = await db.auth.updateUser({ password: pw })
-      setBusy(false)
-      if (error) setMsg(fr(error.message))
-      else {
-        toast('Nouveau mot de passe enregistré !', 'ok')
-        location.hash = '#/profil'
-      }
-    }
-    return (
-      <div className="page auth-wrap">
-        <form className="auth-card auth" onSubmit={saveNewPw}>
-          <div className="auth-head">
-            <BrandLogo height={38} />
-            <h1>Nouveau mot de passe</h1>
-            <p className="mu">Choisissez un nouveau mot de passe pour votre compte Kora.</p>
-          </div>
-          <label>Nouveau mot de passe
-            <input className="field" type="password" required minLength={6} value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" placeholder="6 caractères minimum" />
-          </label>
-          <button className="btn p wide-btn" disabled={busy}>{busy ? 'Enregistrement…' : 'Valider le mot de passe'}</button>
-          {msg && <p className="status-box" role="status">{msg}</p>}
-        </form>
-      </div>
-    )
-  }
-
-  const run = async (f: () => Promise<{ error: { message: string } | null; data?: any }>) => {
-    setBusy(true); setMsg('')
-    const r = await f()
-    setBusy(false)
-    if (r.error) setMsg(fr(r.error.message))
-    return r
-  }
-
   const resendConfirmation = async () => {
     if (!email.trim()) { setMsg('Saisissez votre adresse e-mail.'); return }
     setBusy(true); setMsg('')
-    const { error } = await db.auth.resend({
-      type: 'signup',
-      email: email.trim(),
-      options: { emailRedirectTo: `${location.origin}/` }
-    })
+    const r = await apiPost('/api/auth?action=resend', { email: email.trim(), app: 'kora' })
     setBusy(false)
-    if (error) setMsg(fr(error.message))
-    else setMsg('E-mail de confirmation renvoyé ! Pensez aussi à vérifier votre dossier Spam / Indésirables.')
+    setMsg(r.ok ? (r.data.message || 'E-mail de confirmation renvoyé !') : (r.data.error || 'Erreur d’envoi.'))
   }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setAwaitingConfirm(false)
+    setBusy(true); setMsg('')
+
     if (mode === 'email') {
       const cleanEmail = email.trim()
       if (signup) {
-        const r = await run(() => db.auth.signUp({
-          email: cleanEmail,
-          password: pw,
-          options: { data: { name: name.trim() }, emailRedirectTo: `${location.origin}/` }
-        }))
-        if (!r.error) {
-          // IMPORTANT : Supabase renvoie 200 avec identities: [] si l'e-mail existe déjà (et n'envoie aucun e-mail !)
-          const alreadyExists = r.data?.user && Array.isArray(r.data.user.identities) && r.data.user.identities.length === 0
-          if (alreadyExists) {
-            setSignup(false)
-            setMsg('Un compte existe déjà avec cette adresse e-mail (aucun nouvel e-mail n’est envoyé). Connectez-vous ci-dessous ou cliquez sur « Mot de passe oublié ? ».')
-          } else if (r.data?.session) {
-            toast('Compte créé ! Bienvenue sur Kora.', 'ok')
-            location.hash = '#/'
-          } else {
-            setAwaitingConfirm(true)
-            setMsg('Un e-mail de confirmation vient d’être envoyé. Vérifiez aussi vos spams/indésirables puis cliquez sur le lien pour activer votre compte.')
-          }
+        const r = await apiPost('/api/auth?action=signup', { email: cleanEmail, password: pw, name: name.trim(), app: 'kora' })
+        setBusy(false)
+        if (!r.ok) {
+          setMsg(r.data.error || 'Inscription impossible.')
+        } else if (r.data.alreadyExists) {
+          setSignup(false)
+          setMsg(r.data.message || 'Un compte existe déjà avec cette adresse e-mail.')
+        } else if (r.data.user) {
+          await refreshSession()
+          toast('Compte créé ! Bienvenue sur Kora.', 'ok')
+          location.hash = '#/'
+        } else {
+          location.hash = `#/confirmation?email=${encodeURIComponent(cleanEmail)}`
         }
       } else {
-        const r = await run(() => db.auth.signInWithPassword({ email: cleanEmail, password: pw }))
-        if (!r.error) {
+        const r = await apiPost('/api/auth?action=login', { email: cleanEmail, password: pw })
+        setBusy(false)
+        if (!r.ok) {
+          setMsg(r.data.error || 'Connexion impossible.')
+          if (r.data.needsConfirm) setAwaitingConfirm(true)
+        } else {
+          await refreshSession()
           toast('Connexion réussie. Bienvenue sur Kora !', 'ok')
           location.hash = '#/'
-        } else if (/email not confirmed/i.test(r.error.message)) {
-          setAwaitingConfirm(true)
         }
       }
     } else if (!sent) {
-      const r = await run(() => db.auth.signInWithOtp({ phone: tel, options: { data: { name } } }))
-      if (!r.error) { setSent(true); setMsg('Un code de vérification vous a été envoyé par SMS.') }
+      const r = await apiPost('/api/auth?action=otp-send', { phone, name: name.trim() })
+      setBusy(false)
+      if (!r.ok) setMsg(r.data.error || 'Envoi SMS impossible.')
+      else { setSent(true); setMsg(r.data.message || 'Un code vous a été envoyé par SMS.') }
     } else {
-      const r = await run(() => db.auth.verifyOtp({ phone: tel, token: code.trim(), type: 'sms' }))
-      if (!r.error) {
+      const r = await apiPost('/api/auth?action=otp-verify', { phone, code })
+      setBusy(false)
+      if (!r.ok) setMsg(r.data.error || 'Code invalide.')
+      else {
+        await refreshSession()
         toast('Connexion réussie.', 'ok')
         location.hash = '#/'
       }
@@ -172,6 +346,10 @@ export function Auth({ recovery = false }: { recovery?: boolean }) {
           <h1>{signup ? 'Créer un compte Kora' : 'Connexion'}</h1>
           <p className="mu">Connectez-vous pour regarder les œuvres, gérer votre liste ou publier sur Kora Studio.</p>
         </div>
+
+        <GoogleAuthButton app="kora" />
+
+        <div className="auth-sep" aria-hidden="true"><span>ou par e-mail / téléphone</span></div>
 
         <div className="chips" role="tablist">
           {([['email', 'E-mail'], ['phone', 'Téléphone']] as const).map(([k, t]) => (
@@ -240,19 +418,9 @@ export function Auth({ recovery = false }: { recovery?: boolean }) {
             {!signup && (
               <>
                 {' · '}
-                <button
-                  type="button"
-                  className="lnk"
-                  onClick={async () => {
-                    if (!email.trim()) return setMsg('Saisissez d’abord votre adresse e-mail.')
-                    setBusy(true)
-                    const { error } = await db.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${location.origin}/#/connexion?recovery=1` })
-                    setBusy(false)
-                    setMsg(error ? fr(error.message) : 'Si ce compte existe, un e-mail de réinitialisation vient d’être envoyé (vérifiez aussi vos spams).')
-                  }}
-                >
+                <a className="lnk" href={`#/reinitialisation${email.trim() ? `?email=${encodeURIComponent(email.trim())}` : ''}`}>
                   Mot de passe oublié ?
-                </button>
+                </a>
               </>
             )}
           </p>
@@ -266,7 +434,7 @@ export function Auth({ recovery = false }: { recovery?: boolean }) {
 
 export function AccountSummary() {
   const { session, role, signOut } = useApp()
-  if (!sb || !session) return null
+  if (!session) return null
   const u = session.user
   return (
     <section className="panel account-cta">
@@ -292,7 +460,7 @@ export function AccountBox() {
   const [pw, setPw] = useState('')
   const [msg, setMsg] = useState('')
 
-  if (!sb || !session) return null
+  if (!session) return null
   const u = session.user
 
   return (
@@ -332,8 +500,8 @@ export function AccountBox() {
             className="btn"
             onClick={async () => {
               if (pw.length < 6) { setMsg('Le mot de passe doit contenir au moins 6 caractères.'); return }
-              const { error } = await sb!.auth.updateUser({ password: pw })
-              if (error) setMsg(fr(error.message))
+              const r = await apiPost('/api/auth?action=update-password', { password: pw })
+              if (!r.ok) setMsg(r.data.error || 'Impossible de modifier le mot de passe.')
               else { toast('Mot de passe mis à jour.', 'ok'); setMsg(''); setPw('') }
             }}
           >

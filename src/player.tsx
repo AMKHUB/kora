@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import Hls from 'hls.js'
 import { Episode, Item, useApp } from './store'
 import { Icon, Meta, Poster } from './ui'
-import { sb } from './supabase'
+import { apiPost } from './api'
 
 const fmt = (s: number) => {
   const sec = Math.max(0, Math.floor(s))
@@ -93,32 +93,26 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
   const nextEp = it?.seasons && epNum ? episodes.find(e => e.number === epNum + 1) : undefined
 
-  // Demande d'URL signée auprès de la fonction serveur « play » (vérification pays, dates, droits, formule)
+  // Demande d'URL signée auprès du serveur /api/play (vérification pays, dates, droits, formule)
   useEffect(() => {
-    if (!sb || !session || trailer || !it) return
+    if (!session || trailer || !it) return
     let off = false
     setStreamErr(null)
     ;(async () => {
-      let episodeId: number | undefined = currentEp?.id
-      if (epNum && !episodeId) {
-        const { data } = await sb!.from('episodes')
-          .select('id,seasons!inner(number,title_id)')
-          .eq('number', epNum)
-          .eq('seasons.number', seasonNum)
-          .eq('seasons.title_id', id)
-          .maybeSingle()
-        episodeId = data?.id
-      }
-      const res = await sb!.functions.invoke('play', { body: { titleId: id, episodeId } })
+      const res = await apiPost<{ url?: string; ads?: boolean }>('/api/play', {
+        titleId: id,
+        episodeId: currentEp?.id,
+        seasonNum: epNum ? seasonNum : undefined,
+        epNum: epNum || undefined
+      })
       if (off) return
-      if (res.data?.url) {
+      if (res.ok && res.data?.url) {
         setSrc(res.data.url)
         if (res.data.ads === false) setAd(0)
-      } else if (res.error) {
-        const status = (res.error as any)?.context?.status
-        if (status === 402) setStreamErr({ code: 402, msg: 'Ce contenu est réservé aux abonnés Kora Premium ou Famille.' })
-        else if (status === 403) setStreamErr({ code: 403, msg: 'Ce titre n’est pas disponible dans votre pays.' })
-        // 404 = aucune vidéo encodée encore téléversée : on reste en mode aperçu cinéma fluide
+      } else if (res.status === 402) {
+        setStreamErr({ code: 402, msg: 'Ce contenu est réservé aux abonnés Kora Premium ou Famille.' })
+      } else if (res.status === 403) {
+        setStreamErr({ code: 403, msg: 'Ce titre n’est pas disponible dans votre pays.' })
       }
     })()
     return () => { off = true }

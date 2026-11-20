@@ -1,22 +1,14 @@
 import { useEffect, useState } from 'react'
-import { sb } from './supabase'
+import { apiGet, apiPost, uploadFileToSignedUrl } from './api'
 import { useApp } from './store'
 import { Icon } from './ui'
 
 const num = (n: unknown) => Number(n || 0).toLocaleString('fr-FR')
-const safe = (n: string) => n.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
 const STATUS: Record<string, string> = { draft: 'Brouillon', published: 'Publié', unpublished: 'Dépublié' }
 const TYPES: [string, string][] = [['series', 'Série'], ['film', 'Film'], ['doc', 'Documentaire'], ['short', 'Court-métrage']]
 const AGES = ['Tous', '7+', '12+', '16+', '18+']
 const ACCESS_KINDS: [string, string][] = [['free', 'Gratuit'], ['premium', 'Premium'], ['rent', 'Location'], ['buy', 'Achat']]
 const COUNTRIES = ['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger', 'Nigeria', 'Ghana', 'Afrique du Sud', 'France', 'Belgique', 'Canada', 'États-Unis']
-const db = () => sb!
-
-async function logAudit(actorId: string, action: string, entity: string, entityId: string) {
-  try {
-    await db().from('audit_log').insert({ actor_id: actorId, action, entity, entity_id: entityId })
-  } catch { /* optionnel selon les politiques RLS */ }
-}
 
 const Table = ({ head, rows, empty }: { head: string[]; rows: any[][]; empty: string }) => rows.length
   ? (
@@ -31,7 +23,6 @@ const Table = ({ head, rows, empty }: { head: string[]; rows: any[][]; empty: st
 
 export function Admin({ q }: { q: URLSearchParams }) {
   const { session, role } = useApp()
-  if (!sb) return <p className="page mu">Base de données Supabase non configurée sur cette instance.</p>
   if (!session) {
     return (
       <div className="page">
@@ -95,9 +86,10 @@ function Stats() {
   const [err, setErr] = useState('')
 
   useEffect(() => {
-    db().rpc('admin_stats').then(({ data, error }) => error ? setErr(error.message) : setS(data))
-    db().from('audit_log').select('id,action,entity,entity_id,created_at').order('created_at', { ascending: false }).limit(15)
-      .then(({ data }) => setLogs(data || []))
+    apiGet<{ stats: any; logs: any[] }>('/api/admin?action=stats').then(r => {
+      if (!r.ok) setErr(r.data.error || 'Erreur de chargement.')
+      else { setS(r.data.stats); setLogs(r.data.logs || []) }
+    })
   }, [])
 
   if (err) return <p className="mu">{err}</p>
@@ -157,16 +149,16 @@ function Stats() {
 }
 
 function Reports() {
-  const { session, toast } = useApp()
+  const { toast } = useApp()
   const [rows, setRows] = useState<any[]>([])
   const [filter, setFilter] = useState<'all' | 'open' | 'closed'>('open')
 
-  const load = () => db().from('reports').select('id,reason,status,created_at,titles(title)').order('created_at', { ascending: false }).then(({ data }) => setRows(data || []))
+  const load = () => apiGet<{ rows: any[] }>('/api/admin?action=reports').then(r => { if (r.ok) setRows(r.data.rows || []) })
   useEffect(() => { load() }, [])
 
   const close = async (id: number) => {
-    await db().from('reports').update({ status: 'closed' }).eq('id', id)
-    if (session) await logAudit(session.user.id, 'close_report', 'reports', String(id))
+    const r = await apiPost('/api/admin?action=close-report', { id })
+    if (!r.ok) { toast(r.data.error || 'Erreur.', 'err'); return }
     toast('Signalement clos.', 'ok')
     load()
   }
@@ -199,7 +191,7 @@ function Reports() {
 }
 
 function RightsManager() {
-  const { session, toast } = useApp()
+  const { toast } = useApp()
   const [titles, setTitles] = useState<any[]>([])
   const [rights, setRights] = useState<any[]>([])
   const [titleId, setTitleId] = useState('')
@@ -209,35 +201,33 @@ function RightsManager() {
   const [until, setUntil] = useState('')
 
   const load = async () => {
-    const [t, r] = await Promise.all([
-      db().from('titles').select('id,title').order('title'),
-      db().from('rights').select('id,title_id,country,access,available_from,available_until,titles(title)').order('id', { ascending: false })
-    ])
-    setTitles(t.data || [])
-    setRights(r.data || [])
-    if (!titleId && t.data?.[0]) setTitleId(String(t.data[0].id))
+    const r = await apiGet<{ titles: any[]; rights: any[] }>('/api/admin?action=rights')
+    if (r.ok) {
+      setTitles(r.data.titles || [])
+      setRights(r.data.rights || [])
+      if (!titleId && r.data.titles?.[0]) setTitleId(String(r.data.titles[0].id))
+    }
   }
   useEffect(() => { load() }, [])
 
   const add = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!titleId) return
-    const { error } = await db().from('rights').insert({
+    const r = await apiPost('/api/admin?action=add-right', {
       title_id: +titleId,
       country,
       access,
       available_from: from || null,
       available_until: until || null
     })
-    if (error) { toast(error.message, 'err'); return }
-    if (session) await logAudit(session.user.id, `add_right:${country}:${access}`, 'rights', titleId)
+    if (!r.ok) { toast(r.data.error || 'Erreur.', 'err'); return }
     toast('Droit territorial ajouté.', 'ok')
     load()
   }
 
   const remove = async (id: number) => {
-    const { error } = await db().from('rights').delete().eq('id', id)
-    if (error) { toast(error.message, 'err'); return }
+    const r = await apiPost('/api/admin?action=delete-right', { id })
+    if (!r.ok) { toast(r.data.error || 'Erreur.', 'err'); return }
     toast('Règle supprimée.', 'info')
     load()
   }
@@ -245,7 +235,7 @@ function RightsManager() {
   return (
     <section className="panel">
       <h2>Droits de diffusion par pays</h2>
-      <p className="mu">Définissez les territoires autorisés et le niveau d’accès requis (contrôlé par la fonction serveur « play »).</p>
+      <p className="mu">Définissez les territoires autorisés et le niveau d’accès requis (contrôlé côté serveur lors de la lecture).</p>
       <form className="inline" onSubmit={add}>
         <label>Titre
           <select value={titleId} onChange={e => setTitleId(e.target.value)}>
@@ -294,24 +284,15 @@ function UsersManager() {
   const [err, setErr] = useState('')
 
   const load = async () => {
-    const rpc = await db().rpc('admin_list_accounts')
-    if (!rpc.error && rpc.data) {
-      setRows(rpc.data)
-      setErr('')
-    } else {
-      const fallback = await db().from('accounts').select('id,name,phone,country,role,created_at').order('created_at', { ascending: false }).limit(100)
-      if (fallback.error) setErr(fallback.error.message)
-      else setRows(fallback.data || [])
-    }
+    const r = await apiGet<{ rows: any[] }>('/api/admin?action=users')
+    if (!r.ok) setErr(r.data.error || 'Erreur de chargement.')
+    else { setRows(r.data.rows || []); setErr('') }
   }
   useEffect(() => { load() }, [])
 
   const changeRole = async (id: string, newRole: string) => {
-    const res = await db().rpc('admin_set_role', { target_id: id, new_role: newRole })
-    if (res.error) {
-      toast(res.error.message, 'err')
-      return
-    }
+    const r = await apiPost('/api/admin?action=set-role', { target_id: id, new_role: newRole })
+    if (!r.ok) { toast(r.data.error || 'Erreur.', 'err'); return }
     toast('Rôle mis à jour.', 'ok')
     load()
   }
@@ -346,18 +327,18 @@ function UsersManager() {
 }
 
 function List() {
-  const { session, reloadCatalog, toast } = useApp()
+  const { reloadCatalog, toast } = useApp()
   const [rows, setRows] = useState<any[]>([])
   const [q, setQ] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
 
-  const load = () => db().from('titles').select('id,title,type,year,country,status,poster_url,creator_id').order('id', { ascending: false }).then(({ data }) => setRows(data || []))
+  const load = () => apiGet<{ rows: any[] }>('/api/admin?action=titles').then(r => { if (r.ok) setRows(r.data.rows || []) })
   useEffect(() => { load() }, [])
 
   const toggle = async (t: any) => {
     const next = t.status === 'published' ? 'unpublished' : 'published'
-    await db().from('titles').update({ status: next, updated_at: new Date().toISOString() }).eq('id', t.id)
-    if (session) await logAudit(session.user.id, `set_status:${next}`, 'titles', String(t.id))
+    const r = await apiPost('/api/admin?action=toggle-title', { id: t.id, status: next })
+    if (!r.ok) { toast(r.data.error || 'Erreur.', 'err'); return }
     toast(next === 'published' ? 'Contenu publié.' : 'Contenu dépublié.', 'ok')
     load()
     reloadCatalog()
@@ -365,9 +346,8 @@ function List() {
 
   const remove = async (t: any) => {
     if (!confirm(`Supprimer définitivement « ${t.title} » ?`)) return
-    const { error } = await db().from('titles').delete().eq('id', t.id)
-    if (error) { toast(error.message, 'err'); return }
-    if (session) await logAudit(session.user.id, 'delete_title', 'titles', String(t.id))
+    const r = await apiPost('/api/admin?action=delete-title', { id: t.id })
+    if (!r.ok) { toast(r.data.error || 'Erreur.', 'err'); return }
     toast('Contenu supprimé.', 'info')
     load()
     reloadCatalog()
@@ -426,22 +406,9 @@ const blank = (presetType?: string): F => ({
   country: 'Mali', original_language: 'fr', age_rating: 'Tous', synopsis_short: '', synopsis_long: '', status: 'published',
   is_trending: false, is_new: true, is_exclusive: false, available_from: '', available_until: '', poster_url: '', backdrop_url: ''
 })
-const names = (s: string) => [...new Set(s.split(',').map(x => x.trim()).filter(Boolean))]
-
-async function peopleIds(list: string[]): Promise<number[]> {
-  if (!list.length) return []
-  const { data } = await db().from('people').select('id,name').in('name', list)
-  const have = new Map<string, number>((data || []).map((p: any) => [p.name, p.id]))
-  const missing = list.filter(n => !have.has(n))
-  if (missing.length) {
-    const { data: ins } = await db().from('people').insert(missing.map(name => ({ name }))).select('id,name')
-    ;(ins || []).forEach((p: any) => have.set(p.name, p.id))
-  }
-  return list.map(n => have.get(n) as number)
-}
 
 function Editor({ id, presetType }: { id: string; presetType?: string }) {
-  const { session, reloadCatalog, toast } = useApp()
+  const { reloadCatalog, toast } = useApp()
   const isNew = id === 'new'
   const [f, setF] = useState<F>(() => blank(presetType))
   const [genres, setGenres] = useState<any[]>([])
@@ -452,14 +419,12 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
   const [vid, setVid] = useState<any>(null)
-  const [seasonsList, setSeasonsList] = useState<any[]>([])
   const [eps, setEps] = useState<any[]>([])
   const [newEpSeason, setNewEpSeason] = useState('1')
   const [newEpTitle, setNewEpTitle] = useState('')
   const [newEpSynopsis, setNewEpSynopsis] = useState('')
   const [newEpDur, setNewEpDur] = useState('45')
   const [newEpIntro, setNewEpIntro] = useState('75')
-  // Fichiers couverture & bannière sélectionnés même avant la 1re sauvegarde !
   const [pendingPoster, setPendingPoster] = useState<File | null>(null)
   const [pendingPosterPreview, setPendingPosterPreview] = useState('')
   const [pendingBackdrop, setPendingBackdrop] = useState<File | null>(null)
@@ -468,33 +433,38 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
   const up = (k: keyof F, v: unknown) => setF(x => ({ ...x, [k]: v }))
 
   const load = async () => {
-    const [g, l] = await Promise.all([db().from('genres').select('id,name').order('name'), db().from('languages').select('code,name').order('name')])
-    setGenres(g.data || []); setLangs(l.data || [])
+    const r = await apiGet<{ genres: any[]; langs: any[]; title: any }>(`/api/admin?action=title-detail&id=${encodeURIComponent(id)}`)
+    if (!r.ok) { setMsg(r.data.error || 'Impossible de charger la fiche.'); return }
+    setGenres(r.data.genres || [])
+    setLangs(r.data.langs || [])
     if (isNew) return
-    const { data: t } = await db().from('titles')
-      .select('*, title_genres(genre_id), title_people(role,position,people(name)), video_assets(id,size_bytes), seasons(id,number, episodes(id,number,title,synopsis,duration_min,intro_end_sec,video_assets(id)))')
-      .eq('id', id).maybeSingle()
+    const t = r.data.title
     if (!t) return setMsg('Contenu introuvable.')
     setF({
       title: t.title, type: t.type, year: String(t.year ?? ''), duration_min: String(t.duration_min ?? ''), country: t.country, original_language: t.original_language || 'fr', age_rating: t.age_rating,
       synopsis_short: t.synopsis_short || '', synopsis_long: t.synopsis_long || '', status: t.status, is_trending: t.is_trending, is_new: t.is_new, is_exclusive: t.is_exclusive,
       available_from: t.available_from || '', available_until: t.available_until || '', poster_url: t.poster_url || '', backdrop_url: t.backdrop_url || ''
     })
-    setSel(t.title_genres.map((x: any) => x.genre_id))
-    setDir(t.title_people.filter((x: any) => x.role === 'director').map((x: any) => x.people.name).join(', '))
-    setCast(t.title_people.filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people.name).join(', '))
+    setSel((t.title_genres || []).map((x: any) => x.genre_id))
+    setDir((t.title_people || []).filter((x: any) => x.role === 'director').map((x: any) => x.people?.name).filter(Boolean).join(', '))
+    setCast((t.title_people || []).filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people?.name).filter(Boolean).join(', '))
     setVid(t.video_assets?.[0] || null)
     const sortedSeasons = (t.seasons || []).sort((a: any, b: any) => a.number - b.number)
-    setSeasonsList(sortedSeasons)
     setEps(sortedSeasons.flatMap((s: any) => (s.episodes || []).sort((a: any, b: any) => a.number - b.number).map((e: any) => ({ ...e, season: s.number }))))
   }
   useEffect(() => { load() }, [])
 
-  const uploadImageFile = async (tid: number, file: File, kind: 'poster' | 'backdrop'): Promise<string | null> => {
-    const path = `${tid}/${kind}-${Date.now()}-${safe(file.name)}`
-    const { error } = await db().storage.from('posters').upload(path, file, { contentType: file.type })
-    if (error) { setMsg(error.message); return null }
-    return db().storage.from('posters').getPublicUrl(path).data.publicUrl
+  const uploadImageFile = async (file: File, kind: 'poster' | 'backdrop'): Promise<string | null> => {
+    const sign = await apiPost<{ signedUrl: string; publicUrl: string }>('/api/admin?action=sign-upload', {
+      bucket: 'posters',
+      folder: isNew ? 'covers' : id,
+      kind,
+      fileName: file.name
+    })
+    if (!sign.ok || !sign.data.signedUrl) { setMsg(sign.data.error || 'Échec préparation upload.'); return null }
+    const upRes = await uploadFileToSignedUrl(sign.data.signedUrl, file)
+    if (!upRes.ok) { setMsg(upRes.error || 'Échec upload image.'); return null }
+    return sign.data.publicUrl
   }
 
   const save = async () => {
@@ -503,55 +473,44 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
       return setMsg('Une page de couverture (affiche 2:3) est obligatoire pour publier un contenu sur Kora.')
     }
     setBusy(true); setMsg('')
-    const row = {
-      title: f.title.trim(), type: f.type, year: f.year ? +f.year : null, duration_min: f.duration_min ? +f.duration_min : null,
-      country: f.country.trim() || 'Mali', original_language: f.original_language || null, age_rating: f.age_rating,
-      synopsis_short: (f.synopsis_short.trim() || f.synopsis_long.trim()).slice(0, 180),
-      synopsis_long: f.synopsis_long.trim(),
-      status: f.status, is_trending: f.is_trending, is_new: f.is_new, is_exclusive: f.is_exclusive,
-      available_from: f.available_from || null, available_until: f.available_until || null,
-      poster_url: f.poster_url.trim() || null, backdrop_url: f.backdrop_url.trim() || null,
-      updated_at: new Date().toISOString()
-    }
-    const r = isNew ? await db().from('titles').insert(row).select('id').single() : await db().from('titles').update(row).eq('id', id).select('id').single()
-    if (r.error) { setBusy(false); return setMsg(r.error.message) }
-    const tid = r.data.id as number
 
-    // Téléversement automatique des pages de couverture sélectionnées
-    const mediaPatch: Record<string, string> = {}
+    let posterUrl = f.poster_url.trim()
+    let backdropUrl = f.backdrop_url.trim()
+
     if (pendingPoster) {
-      const url = await uploadImageFile(tid, pendingPoster, 'poster')
-      if (url) { mediaPatch.poster_url = url; up('poster_url', url) }
+      const url = await uploadImageFile(pendingPoster, 'poster')
+      if (!url) { setBusy(false); return }
+      posterUrl = url
+      up('poster_url', url)
       setPendingPoster(null); setPendingPosterPreview('')
     }
     if (pendingBackdrop) {
-      const url = await uploadImageFile(tid, pendingBackdrop, 'backdrop')
-      if (url) { mediaPatch.backdrop_url = url; up('backdrop_url', url) }
+      const url = await uploadImageFile(pendingBackdrop, 'backdrop')
+      if (!url) { setBusy(false); return }
+      backdropUrl = url
+      up('backdrop_url', url)
       setPendingBackdrop(null); setPendingBackdropPreview('')
     }
-    if (Object.keys(mediaPatch).length) {
-      await db().from('titles').update(mediaPatch).eq('id', tid)
-    }
 
-    await db().from('title_genres').delete().eq('title_id', tid)
-    if (sel.length) await db().from('title_genres').insert(sel.map(genre_id => ({ title_id: tid, genre_id })))
-    await db().from('title_people').delete().eq('title_id', tid)
-    const [di, ci] = await Promise.all([peopleIds(names(dir)), peopleIds(names(cast))])
-    const links = [...di.map(person_id => ({ title_id: tid, person_id, role: 'director', position: 0 })), ...ci.map((person_id, i) => ({ title_id: tid, person_id, role: 'actor', position: i + 1 }))]
-    if (links.length) await db().from('title_people').insert(links)
-    if (session) await logAudit(session.user.id, isNew ? 'create_title' : 'update_title', 'titles', String(tid))
+    const r = await apiPost<{ id: number }>('/api/admin?action=save-title', {
+      id: isNew ? 'new' : id,
+      form: { ...f, poster_url: posterUrl, backdrop_url: backdropUrl },
+      genres: sel,
+      director: dir,
+      cast
+    })
     setBusy(false)
+    if (!r.ok) return setMsg(r.data.error || 'Impossible d’enregistrer.')
     toast(f.type === 'series' ? 'Série enregistrée avec sa couverture et son synopsis.' : 'Contenu enregistré.', 'ok')
     reloadCatalog()
-    if (isNew) location.hash = `#/admin?t=titles&id=${tid}`
+    if (isNew && r.data.id) location.hash = `#/admin?t=titles&id=${r.data.id}`
   }
 
   const del = async () => {
     if (!confirm('Supprimer définitivement ce contenu ?')) return
-    const { error } = await db().from('titles').delete().eq('id', id)
-    if (error) setMsg(error.message)
+    const r = await apiPost('/api/admin?action=delete-title', { id })
+    if (!r.ok) setMsg(r.data.error || 'Erreur de suppression.')
     else {
-      if (session) await logAudit(session.user.id, 'delete_title', 'titles', id)
       toast('Contenu supprimé.', 'info')
       reloadCatalog()
       location.hash = '#/admin?t=titles'
@@ -561,33 +520,25 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
   const addEpisode = async () => {
     if (isNew || !newEpTitle.trim()) return
     setBusy(true)
-    const sNum = Math.max(1, +newEpSeason || 1)
-    let seasonRow = seasonsList.find(s => s.number === sNum)
-    if (!seasonRow) {
-      const { data, error } = await db().from('seasons').insert({ title_id: +id, number: sNum }).select('id,number').single()
-      if (error) { setBusy(false); return setMsg(error.message) }
-      seasonRow = data
-    }
-    const nextNum = eps.filter(e => e.season === sNum).length + 1
-    const { error } = await db().from('episodes').insert({
-      season_id: seasonRow.id,
-      number: nextNum,
+    const r = await apiPost<{ season: number; number: number }>('/api/admin?action=add-episode', {
+      titleId: +id,
+      season: +newEpSeason || 1,
       title: newEpTitle.trim(),
-      synopsis: newEpSynopsis.trim() || null,
+      synopsis: newEpSynopsis.trim(),
       duration_min: +newEpDur || 45,
       intro_end_sec: +newEpIntro || 75
     })
     setBusy(false)
-    if (error) return setMsg(error.message)
+    if (!r.ok) return setMsg(r.data.error || 'Erreur ajout épisode.')
     setNewEpTitle(''); setNewEpSynopsis('')
-    toast(`Épisode S${sNum}E${nextNum} ajouté.`, 'ok')
+    toast(`Épisode S${r.data.season}E${r.data.number} ajouté.`, 'ok')
     reloadCatalog()
     load()
   }
 
   const deleteEpisode = async (epId: number) => {
     if (!confirm('Supprimer cet épisode ?')) return
-    await db().from('episodes').delete().eq('id', epId)
+    await apiPost('/api/admin?action=delete-episode', { id: epId })
     toast('Épisode supprimé.', 'info')
     reloadCatalog()
     load()
@@ -603,13 +554,24 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
   const uploadVideo = async (file: File | undefined, target: { title_id?: number; episode_id?: number }) => {
     if (!file) return
     setBusy(true); setMsg(`Envoi de ${file.name} (${Math.round(file.size / 1048576)} Mo), ne fermez pas cette page…`)
-    const path = `${id}/${Date.now()}-${safe(file.name)}`
-    const { error } = await db().storage.from('videos').upload(path, file, { contentType: file.type })
-    if (error) { setBusy(false); return setMsg(/exceed|size|large/i.test(error.message) ? 'Fichier trop volumineux : limite de 50 Mo sur le plan Supabase gratuit.' : error.message) }
-    const col = target.title_id ? 'title_id' : 'episode_id'
-    await db().from('video_assets').delete().eq(col, (target.title_id ?? target.episode_id) as number)
-    const { error: e2 } = await db().from('video_assets').insert({ ...target, storage_path: path, size_bytes: file.size, mime: file.type, status: 'ready' })
-    setBusy(false); setMsg(e2 ? e2.message : 'Vidéo envoyée, prête à la lecture.'); load()
+    const sign = await apiPost<{ signedUrl: string; path: string }>('/api/admin?action=sign-upload', {
+      bucket: 'videos',
+      folder: id,
+      kind: target.episode_id ? `ep-${target.episode_id}` : 'film',
+      fileName: file.name
+    })
+    if (!sign.ok || !sign.data.signedUrl) { setBusy(false); return setMsg(sign.data.error || 'Échec préparation upload vidéo.') }
+    const upRes = await uploadFileToSignedUrl(sign.data.signedUrl, file)
+    if (!upRes.ok) { setBusy(false); return setMsg(upRes.error || 'Échec upload vidéo.') }
+    const reg = await apiPost('/api/admin?action=register-video', {
+      ...target,
+      storage_path: sign.data.path,
+      size_bytes: file.size,
+      mime: file.type
+    })
+    setBusy(false)
+    setMsg(reg.ok ? 'Vidéo envoyée, prête à la lecture.' : (reg.data.error || 'Erreur enregistrement vidéo.'))
+    load()
   }
 
   const chk = (k: 'is_trending' | 'is_new' | 'is_exclusive', t: string) => (
@@ -633,10 +595,9 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
         <label>Statut<select value={f.status} onChange={e => up('status', e.target.value)}>{Object.entries(STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
       </div>
 
-      {/* Pages de couverture (Affiche 2:3 + Bannière 16:9) dès la création */}
       <div className="cover-upload-grid">
         <div className="cover-box">
-          <strong>Page de couverture (Affiche 2:3)</strong>
+          <strong>Page de couverture (Affiche 2:3 · obligatoire)</strong>
           {posterPreview ? <img className="thumb" src={posterPreview} alt="Aperçu couverture" /> : <div className="thumb placeholder">Aucune affiche</div>}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => pickImage(e.target.files?.[0], 'poster')} />
           <input className="field" value={f.poster_url} onChange={e => up('poster_url', e.target.value)} placeholder="…ou coller une URL d’image" aria-label="URL de la couverture" />

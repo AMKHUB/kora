@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
-import type { Session } from '@supabase/supabase-js'
-import { sb } from './supabase'
-import { IS_BILLING_SIMULATION, processPaymentCheckout } from './billing'
+import { apiGet, apiPost, AuthUser, consumeAuthRedirectTokens } from './api'
+import { processPaymentCheckout } from './billing'
+
+export type SessionState = { user: AuthUser }
 
 export type Episode = {
   id?: number
@@ -267,89 +268,13 @@ function loadPrefs(): State {
   }
 }
 
-const TYPES: Record<string, Item['type']> = { film: 'film', series: 'serie', doc: 'doc', short: 'court' }
-
-function buildCatalogFromItems(items: Item[]): Catalog {
-  const ids = (f: (i: Item) => boolean) => items.filter(f).map(i => i.id)
-  const flag = (k: 'isTrending' | 'isNew' | 'isExclusive'): number[] => items.filter(t => t[k]).map(t => t.id)
-  const trending = flag('isTrending')
-  const excl = flag('isExclusive')
-  const news = flag('isNew')
-  const heroes = [...new Set([...excl, ...trending, ...items.map(i => i.id)])].slice(0, 5)
-  return {
-    items,
-    hero: heroes[0] || items[0]?.id || 0,
-    heroes,
-    rows: {
-      top10: [...new Set([...trending, ...excl, ...news, ...items.map(i => i.id)])].slice(0, 10),
-      trending: trending.length ? trending : ids(i => i.country === 'Mali'),
-      new: news.length ? news : ids(i => i.year >= 2024),
-      malifilms: ids(i => i.country === 'Mali' && i.type === 'film'),
-      series: ids(i => i.type === 'serie'),
-      africa: ids(i => i.country !== 'Mali'),
-      docs: ids(i => i.type === 'doc'),
-      shorts: ids(i => i.type === 'court'),
-      discover: ids(i => i.country !== 'Mali' && i.type === 'film'),
-      classics: ids(i => i.year < 2000),
-      pick: ids(i => !trending.includes(i.id)).slice(0, 8)
-    }
-  }
-}
-
-// Charge uniquement les œuvres publiées qui possèdent une vraie page de couverture (poster_url)
 async function loadCatalog(): Promise<Catalog> {
-  if (sb) {
-    const { data, error } = await sb.from('titles')
-      .select('id,type,title,synopsis_short,synopsis_long,year,duration_min,country,age_rating,poster_url,backdrop_url,trailer_url,is_trending,is_new,is_exclusive,title_genres(genres(name)),title_people(role,position,people(name)),title_languages(kind,languages(name)),seasons(number,episodes(id,number,title,synopsis,duration_min,intro_end_sec))')
-      .eq('status', 'published')
-      .not('poster_url', 'is', null)
-      .neq('poster_url', '')
-      .order('id', { ascending: false })
-    if (!error) {
-      const items: Item[] = (data || [])
-        .filter((t: any) => typeof t.poster_url === 'string' && t.poster_url.trim().length > 0)
-        .map((t: any) => {
-          const episodesBySeason: Record<number, Episode[]> = {}
-          for (const s of (t.seasons || [])) {
-            const eps = (s.episodes || []).slice().sort((a: any, b: any) => a.number - b.number)
-            if (eps.length) episodesBySeason[s.number] = eps
-          }
-          const langs = (t.title_languages || []).filter((x: any) => x.kind === 'audio' && x.languages?.name).map((x: any) => x.languages.name)
-          const subtitles = (t.title_languages || []).filter((x: any) => x.kind === 'subtitle' && x.languages?.name).map((x: any) => x.languages.name)
-          return {
-            id: t.id,
-            title: t.title,
-            type: TYPES[t.type] || 'serie',
-            year: t.year || new Date().getFullYear(),
-            country: t.country || 'Mali',
-            age: t.age_rating || 'Tous',
-            dur: t.duration_min || 45,
-            synopsis: t.synopsis_long || t.synopsis_short || '',
-            poster: t.poster_url,
-            backdrop: t.backdrop_url || undefined,
-            trailer: t.trailer_url || undefined,
-            genres: (t.title_genres || []).map((x: any) => x.genres?.name).filter(Boolean),
-            langs: langs.length ? langs : ['Français'],
-            subtitles: subtitles.length ? subtitles : ['Français', 'English'],
-            director: (t.title_people || []).find((x: any) => x.role === 'director')?.people?.name || '',
-            cast: (t.title_people || []).filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people?.name).filter(Boolean),
-            seasons: (t.seasons || []).length || undefined,
-            episodesBySeason: Object.keys(episodesBySeason).length ? episodesBySeason : undefined,
-            quality: t.is_exclusive ? '4K' : 'HD',
-            hdr: !!t.is_exclusive,
-            audioDesc: false,
-            badge: t.is_exclusive ? 'Original Kora' : t.is_new ? 'Nouveauté' : undefined,
-            isTrending: !!t.is_trending,
-            isNew: !!t.is_new,
-            isExclusive: !!t.is_exclusive
-          }
-        })
-      return buildCatalogFromItems(items)
-    }
+  const res = await apiGet<Catalog>('/api/catalog')
+  if (res.ok && Array.isArray(res.data?.items)) {
+    const items = res.data.items.filter((i: any) => typeof i.poster === 'string' && i.poster.trim().length > 0)
+    return { ...res.data, items }
   }
-  const fb = await fetch('/api/catalog').then(r => r.json()).catch(() => ({ items: [] }))
-  const withCovers: Item[] = (fb.items || []).filter((i: any) => typeof i.poster === 'string' && i.poster.trim().length > 0)
-  return buildCatalogFromItems(withCovers)
+  return { items: [], hero: 0, heroes: [], rows: {} }
 }
 
 type Ctx = {
@@ -358,8 +283,10 @@ type Ctx = {
   cat: Catalog | null
   items: Item[]
   byId: (id: number) => Item | undefined
-  session: Session | null
+  session: SessionState | null
   authReady: boolean
+  authConfigured: boolean
+  billingSimulation: boolean
   role: string
   isPremium: boolean
   unreadCount: number
@@ -367,7 +294,8 @@ type Ctx = {
   toast: (msg: string, kind?: Toast['kind']) => void
   dismissToast: (id: number) => void
   requireAuth: (actionLabel?: string) => boolean
-  signOut: () => void
+  refreshSession: () => Promise<void>
+  signOut: () => Promise<void>
   reloadCatalog: () => void
   toggleList: (id: number) => void
   progress: (id: number, s: number, season?: number, episode?: number) => void
@@ -396,8 +324,10 @@ export const useApp = () => useContext(C)
 export function Provider({ children }: { children: ReactNode }) {
   const [st, setSt] = useState<State>(loadPrefs)
   const [cat, setCat] = useState<Catalog | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
-  const [authReady, setAuthReady] = useState(!sb)
+  const [session, setSession] = useState<SessionState | null>(null)
+  const [authReady, setAuthReady] = useState(false)
+  const [authConfigured, setAuthConfigured] = useState(true)
+  const [billingSimulation, setBillingSimulation] = useState(true)
   const [role, setRole] = useState('user')
   const [toasts, setToasts] = useState<Toast[]>([])
 
@@ -447,53 +377,64 @@ export function Provider({ children }: { children: ReactNode }) {
 
   useEffect(() => { reloadCatalog() }, [reloadCatalog])
 
-  useEffect(() => {
-    if (!sb) { setAuthReady(true); return }
-    sb.auth.getSession().then(({ data }) => { setSession(data.session); setAuthReady(true) })
-    const { data } = sb.auth.onAuthStateChange((ev, s) => {
-      setSession(s)
-      setAuthReady(true)
-      if (ev === 'PASSWORD_RECOVERY') {
-        location.hash = '#/connexion?recovery=1'
-      } else if (ev === 'SIGNED_OUT') {
-        setRole('user')
-        setSt(s0 => ({ ...init, theme: s0.theme }))
-      }
-    })
-    return () => data.subscription.unsubscribe()
+  const refreshSession = useCallback(async () => {
+    const r = await apiGet<{ configured: boolean; billingMode: string; user: AuthUser | null; role: string }>('/api/auth?action=session')
+    if (r.ok) {
+      setAuthConfigured(!!r.data.configured)
+      setBillingSimulation(r.data.billingMode !== 'live')
+      setSession(r.data.user ? { user: r.data.user } : null)
+      setRole(r.data.role || 'user')
+    } else {
+      setSession(null)
+      setRole('user')
+    }
+    setAuthReady(true)
   }, [])
 
-  // Synchronisation complète du compte Supabase connecté
   useEffect(() => {
-    if (!sb || !session) return
-    const db = sb, uid = session.user.id
+    let active = true
     ;(async () => {
-      const [acc, prof, list, prog, rat, sub, pay, dev, notif] = await Promise.all([
-        db.from('accounts').select('role,name,country').eq('id', uid).maybeSingle(),
-        db.from('profiles').select('id,name,avatar,is_kid,pin_hash,subtitle_lang,audio_lang,subtitle_size,autoplay_next').order('created_at'),
-        db.from('my_list').select('profile_id,title_id'),
-        db.from('watch_progress').select('profile_id,title_id,episode_id,position_sec'),
-        db.from('ratings').select('profile_id,title_id,value'),
-        db.from('subscriptions').select('plan_id,status,current_period_end,cancel_at_period_end').eq('status', 'active').order('id', { ascending: false }).limit(1),
-        db.from('payments').select('id,amount_xof,provider,provider_ref,status,created_at').order('created_at', { ascending: false }).limit(20),
-        db.from('devices').select('id,name,platform,last_seen_at,revoked_at').order('last_seen_at', { ascending: false }),
-        db.from('notifications').select('id,title,body,kind,link,read_at,created_at').order('created_at', { ascending: false }).limit(20).then(r => r, () => ({ data: null }))
-      ])
+      const consumed = await consumeAuthRedirectTokens()
+      if (!active) return
+      await refreshSession()
+      if (!active) return
+      if (consumed.handled) {
+        if (consumed.error) {
+          const enc = encodeURIComponent(consumed.error)
+          location.hash = consumed.flow === 'recovery'
+            ? `#/reinitialisation?status=error&msg=${enc}`
+            : `#/confirmation?status=error&msg=${enc}`
+        } else if (consumed.flow === 'recovery') {
+          location.hash = '#/reinitialisation?step=new'
+        } else if (consumed.flow === 'confirm') {
+          location.hash = '#/confirmation?status=ok'
+        } else {
+          location.hash = '#/'
+        }
+      }
+    })()
+    return () => { active = false }
+  }, [refreshSession])
 
-      setRole(acc.data?.role || 'user')
+  // Synchronisation complète du compte connecté via l'API interne /api/me
+  useEffect(() => {
+    if (!session) return
+    const curDev = detectDevice()
+    ;(async () => {
+      const qs = new URLSearchParams({ action: 'sync', deviceName: curDev.name, devicePlatform: curDev.platform })
+      const res = await apiGet<any>(`/api/me?${qs}`)
+      if (!res.ok || !res.data) return
+      const d = res.data
+      setRole(d.account?.role || role || 'user')
       const mine = (rows: any[] | null, p: string) => (rows || []).filter(x => x.profile_id === p)
 
-      const curDev = detectDevice()
-      const mappedDevices: DeviceInfo[] = (dev.data || [])
-        .filter((d: any) => !d.revoked_at)
-        .map((d: any) => ({ id: d.id, name: d.name, platform: d.platform || 'Web', lastSeen: d.last_seen_at, current: d.name === curDev.name }))
-      if (!mappedDevices.length) {
-        mappedDevices.push(curDev)
-        db.from('devices').insert({ account_id: uid, name: curDev.name, platform: curDev.platform, last_seen_at: new Date().toISOString() }).then(() => {}, () => {})
-      }
+      const mappedDevices: DeviceInfo[] = (d.devices || []).map((dv: any) => ({
+        id: dv.id, name: dv.name, platform: dv.platform || 'Web', lastSeen: dv.last_seen_at, current: dv.name === curDev.name
+      }))
+      if (!mappedDevices.length) mappedDevices.push(curDev)
 
-      const dbPlan = (sub.data?.[0]?.plan_id as PlanId) || 'free'
-      const mappedInvoices: Invoice[] = (pay.data || []).map((p: any) => ({
+      const dbPlan = (d.subscription?.plan_id as PlanId) || 'free'
+      const mappedInvoices: Invoice[] = (d.payments || []).map((p: any) => ({
         id: String(p.id),
         date: p.created_at,
         planId: p.amount_xof >= 4500 ? 'family' : 'premium',
@@ -505,36 +446,36 @@ export function Provider({ children }: { children: ReactNode }) {
         status: p.status === 'paid' ? 'paid' : 'pending'
       }))
 
-      const mappedNotifs: AppNotification[] = (notif as any)?.data?.length
-        ? (notif as any).data.map((n: any) => ({ id: String(n.id), title: n.title, body: n.body, kind: n.kind || 'info', link: n.link || undefined, read: !!n.read_at, date: n.created_at }))
-        : []
+      const mappedNotifs: AppNotification[] = (d.notifications || []).map((n: any) => ({
+        id: String(n.id), title: n.title, body: n.body, kind: n.kind || 'info', link: n.link || undefined, read: !!n.read_at, date: n.created_at
+      }))
 
       setSt(s => ({
         ...s,
-        accountName: acc.data?.name || s.accountName,
-        accountCountry: acc.data?.country || s.accountCountry || 'Mali',
+        accountName: d.account?.name || s.accountName,
+        accountCountry: d.account?.country || s.accountCountry || 'Mali',
         plan: dbPlan,
-        cancelAtPeriodEnd: !!sub.data?.[0]?.cancel_at_period_end,
-        periodEnd: sub.data?.[0]?.current_period_end || s.periodEnd,
+        cancelAtPeriodEnd: !!d.subscription?.cancel_at_period_end,
+        periodEnd: d.subscription?.current_period_end || s.periodEnd,
         invoices: mappedInvoices,
         devices: mappedDevices,
         notifications: mappedNotifs,
-        ...(prof.data?.length ? {
-          cur: prof.data.some((p: any) => p.id === s.cur) ? s.cur : prof.data[0].id,
-          subLang: prof.data[0].subtitle_lang || s.subLang,
-          audioLang: prof.data[0].audio_lang || s.audioLang,
-          subSize: (prof.data[0].subtitle_size as State['subSize']) || s.subSize,
-          autoNext: prof.data[0].autoplay_next ?? s.autoNext,
-          profiles: prof.data.map((p: any, idx: number) => ({
+        ...(d.profiles?.length ? {
+          cur: d.profiles.some((p: any) => p.id === s.cur) ? s.cur : d.profiles[0].id,
+          subLang: d.profiles[0].subtitle_lang || s.subLang,
+          audioLang: d.profiles[0].audio_lang || s.audioLang,
+          subSize: (d.profiles[0].subtitle_size as State['subSize']) || s.subSize,
+          autoNext: d.profiles[0].autoplay_next ?? s.autoNext,
+          profiles: d.profiles.map((p: any, idx: number) => ({
             id: p.id,
             name: p.name,
             avatar: p.avatar || AVATARS[idx % AVATARS.length].id,
             kid: !!p.is_kid,
             pinHash: p.pin_hash || undefined,
-            list: mine(list.data, p.id).map(x => x.title_id),
-            hist: Object.fromEntries(mine(prog.data, p.id).filter(x => x.episode_id === 0).map(x => [x.title_id, x.position_sec])),
+            list: mine(d.my_list, p.id).map((x: any) => x.title_id),
+            hist: Object.fromEntries(mine(d.watch_progress, p.id).filter((x: any) => x.episode_id === 0).map((x: any) => [x.title_id, x.position_sec])),
             epHist: {},
-            rate: Object.fromEntries(mine(rat.data, p.id).map(x => [x.title_id, x.value]))
+            rate: Object.fromEntries(mine(d.ratings, p.id).map((x: any) => [x.title_id, x.value]))
           }))
         } : {})
       }))
@@ -542,7 +483,7 @@ export function Provider({ children }: { children: ReactNode }) {
   }, [session?.user.id])
 
   const profile = st.profiles.find(p => p.id === st.cur) || st.profiles[0]
-  const rid = sb && session && /^[0-9a-f-]{36}$/.test(profile.id) ? profile.id : ''
+  const rid = session && /^[0-9a-f-]{36}$/i.test(profile.id) ? profile.id : ''
   const upd = (f: (p: Profile) => Profile) =>
     setSt(s => ({ ...s, profiles: s.profiles.map(p => p.id === s.cur ? f(p) : p) }))
   const items = (cat?.items || []).filter(i => !session || !profile.kid || i.age === 'Tous' || i.age === '7+')
@@ -557,6 +498,8 @@ export function Provider({ children }: { children: ReactNode }) {
     byId: id => items.find(i => i.id === id),
     session,
     authReady,
+    authConfigured,
+    billingSimulation,
     role,
     isPremium,
     unreadCount,
@@ -564,9 +507,13 @@ export function Provider({ children }: { children: ReactNode }) {
     toast,
     dismissToast,
     requireAuth,
+    refreshSession,
     reloadCatalog,
-    signOut: () => {
-      sb?.auth.signOut()
+    signOut: async () => {
+      await apiPost('/api/auth?action=logout')
+      setSession(null)
+      setRole('user')
+      setSt(s0 => ({ ...init, theme: s0.theme }))
       toast('Vous êtes déconnecté.', 'info')
       location.hash = '#/'
     },
@@ -575,12 +522,7 @@ export function Provider({ children }: { children: ReactNode }) {
       const on = profile.list.includes(id)
       upd(p => ({ ...p, list: on ? p.list.filter(x => x !== id) : [...p.list, id] }))
       toast(on ? 'Retiré de Ma liste' : 'Ajouté à Ma liste', 'ok')
-      if (rid) {
-        ;(on
-          ? sb!.from('my_list').delete().match({ profile_id: rid, title_id: id })
-          : sb!.from('my_list').insert({ profile_id: rid, title_id: id })
-        ).then(() => {}, () => {})
-      }
+      if (rid) apiPost('/api/me?action=toggle-list', { profileId: rid, titleId: id, remove: on })
     },
     progress: (id, s, season, episode) => {
       if (!session) return
@@ -590,15 +532,7 @@ export function Provider({ children }: { children: ReactNode }) {
         hist: { ...p.hist, [id]: sec },
         ...(season && episode ? { epHist: { ...p.epHist, [`${id}:${season}:${episode}`]: sec } } : {})
       }))
-      if (rid) {
-        sb!.from('watch_progress').upsert({
-          profile_id: rid,
-          title_id: id,
-          episode_id: 0,
-          position_sec: sec,
-          updated_at: new Date().toISOString()
-        }).then(() => {}, () => {})
-      }
+      if (rid) apiPost('/api/me?action=progress', { profileId: rid, titleId: id, positionSec: sec })
     },
     removeHistory: id => {
       if (!requireAuth('modifier votre historique')) return
@@ -607,13 +541,13 @@ export function Provider({ children }: { children: ReactNode }) {
         delete next[id]
         return { ...p, hist: next }
       })
-      if (rid) sb!.from('watch_progress').delete().match({ profile_id: rid, title_id: id }).then(() => {}, () => {})
+      if (rid) apiPost('/api/me?action=remove-history', { profileId: rid, titleId: id })
       toast('Retiré de l’historique.', 'info')
     },
     clearHistory: () => {
       if (!requireAuth('effacer votre historique')) return
       upd(p => ({ ...p, hist: {}, epHist: {} }))
-      if (rid) sb!.from('watch_progress').delete().eq('profile_id', rid).then(() => {}, () => {})
+      if (rid) apiPost('/api/me?action=remove-history', { profileId: rid })
       toast('Historique effacé.', 'info')
     },
     rate: (id, r) => {
@@ -621,12 +555,7 @@ export function Provider({ children }: { children: ReactNode }) {
       const val = profile.rate?.[id] === r ? '' : r
       upd(p => ({ ...p, rate: { ...p.rate, [id]: val } }))
       if (val) toast(val === 'love' ? 'Noté « J’adore »' : val === 'like' ? 'Noté « J’aime »' : 'Nous proposerons moins ce genre', 'ok')
-      if (rid) {
-        ;(val
-          ? sb!.from('ratings').upsert({ profile_id: rid, title_id: id, value: val, updated_at: new Date().toISOString() })
-          : sb!.from('ratings').delete().match({ profile_id: rid, title_id: id })
-        ).then(() => {}, () => {})
-      }
+      if (rid) apiPost('/api/me?action=rate', { profileId: rid, titleId: id, value: val })
     },
     addProfile: async (name, kid, avatar, pin) => {
       if (!requireAuth('créer un profil')) return
@@ -636,16 +565,12 @@ export function Provider({ children }: { children: ReactNode }) {
         return
       }
       const pinHash = pin ? await hashPin(pin) : undefined
-      if (sb && session) {
-        const { data, error } = await sb.from('profiles')
-          .insert({ account_id: session.user.id, name, is_kid: kid, avatar, pin_hash: pinHash || null, max_age: kid ? '7+' : '18+' })
-          .select('id').single()
-        if (!error && data) {
-          setSt(s => ({ ...s, profiles: [...s.profiles, { id: data.id, name, avatar, kid, pinHash, list: [], hist: {}, epHist: {}, rate: {} }] }))
-          toast(`Profil « ${name} » créé.`, 'ok')
-          return
-        }
-        toast(error?.message || 'Impossible de créer le profil.', 'err')
+      const res = await apiPost<{ id: string }>('/api/me?action=add-profile', { name, isKid: kid, avatar, pinHash })
+      if (res.ok && res.data.id) {
+        setSt(s => ({ ...s, profiles: [...s.profiles, { id: res.data.id, name, avatar, kid, pinHash, list: [], hist: {}, epHist: {}, rate: {} }] }))
+        toast(`Profil « ${name} » créé.`, 'ok')
+      } else {
+        toast(res.data.error || 'Impossible de créer le profil.', 'err')
       }
     },
     updateProfile: async (id, patch) => {
@@ -661,13 +586,16 @@ export function Provider({ children }: { children: ReactNode }) {
           pinHash: patch.pin === undefined ? p.pinHash : pinHash
         } : p)
       }))
-      if (sb && session && /^[0-9a-f-]{36}$/.test(id)) {
-        const dbPatch: Record<string, unknown> = {}
-        if (patch.name !== undefined) dbPatch.name = patch.name
-        if (patch.kid !== undefined) { dbPatch.is_kid = patch.kid; dbPatch.max_age = patch.kid ? '7+' : '18+' }
-        if (patch.avatar !== undefined) dbPatch.avatar = patch.avatar
-        if (patch.pin !== undefined) dbPatch.pin_hash = pinHash || null
-        await sb.from('profiles').update(dbPatch).eq('id', id)
+      if (/^[0-9a-f-]{36}$/i.test(id)) {
+        await apiPost('/api/me?action=update-profile', {
+          id,
+          patch: {
+            ...(patch.name !== undefined ? { name: patch.name } : {}),
+            ...(patch.kid !== undefined ? { kid: patch.kid } : {}),
+            ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
+            ...(patch.pin !== undefined ? { pinHash: pinHash || null } : {})
+          }
+        })
       }
       toast('Profil mis à jour.', 'ok')
     },
@@ -681,8 +609,8 @@ export function Provider({ children }: { children: ReactNode }) {
         const next = s.profiles.filter(p => p.id !== id)
         return { ...s, profiles: next, cur: s.cur === id ? next[0].id : s.cur }
       })
-      if (sb && session && /^[0-9a-f-]{36}$/.test(id)) {
-        await sb.from('profiles').delete().eq('id', id)
+      if (/^[0-9a-f-]{36}$/i.test(id)) {
+        await apiPost('/api/me?action=delete-profile', { id })
       }
       toast('Profil supprimé.', 'info')
     },
@@ -705,13 +633,13 @@ export function Provider({ children }: { children: ReactNode }) {
       const amount = billing === 'year' ? plan.priceYear : plan.priceMonth
       let ref = `SIM-${Date.now().toString(36).toUpperCase()}`
 
-      if (planId !== 'free' && !IS_BILLING_SIMULATION) {
+      if (planId !== 'free' && !billingSimulation) {
         const res = await processPaymentCheckout({
           planId,
           billing,
           provider: provider as 'Orange Money' | 'Moov Money' | 'Wave' | 'Carte bancaire',
           customerRef
-        })
+        }, billingSimulation)
         if (!res.ok) {
           toast(res.error, 'err')
           return { ok: false, error: res.error }
@@ -727,8 +655,8 @@ export function Provider({ children }: { children: ReactNode }) {
         planId,
         planName: plan.name,
         billing,
-        amountXof: IS_BILLING_SIMULATION ? 0 : amount,
-        provider: IS_BILLING_SIMULATION ? `${provider} (simulation)` : provider,
+        amountXof: billingSimulation ? 0 : amount,
+        provider: billingSimulation ? `${provider} (simulation)` : provider,
         reference: ref,
         status: 'paid'
       } : null
@@ -743,7 +671,7 @@ export function Provider({ children }: { children: ReactNode }) {
       toast(
         planId === 'free'
           ? 'Formule gratuite activée.'
-          : IS_BILLING_SIMULATION
+          : billingSimulation
             ? `Kora ${plan.name} activé gratuitement (simulation) !`
             : `Kora ${plan.name} activé !`,
         'ok'
@@ -758,17 +686,15 @@ export function Provider({ children }: { children: ReactNode }) {
     updateAccount: async (name, country) => {
       if (!requireAuth('modifier votre compte')) return
       setSt(s => ({ ...s, accountName: name, accountCountry: country }))
-      if (sb && session) {
-        const { error } = await sb.from('accounts').update({ name, country }).eq('id', session.user.id)
-        if (error) { toast(error.message, 'err'); return }
-      }
+      const res = await apiPost('/api/me?action=update-account', { name, country })
+      if (!res.ok) { toast(res.data.error || 'Erreur de sauvegarde.', 'err'); return }
       toast('Informations du compte enregistrées.', 'ok')
     },
     revokeDevice: async deviceId => {
       if (!requireAuth('gérer vos appareils')) return
       setSt(s => ({ ...s, devices: s.devices.filter(d => d.id !== deviceId) }))
-      if (sb && session && /^[0-9a-f-]{36}$/.test(deviceId)) {
-        await sb.from('devices').update({ revoked_at: new Date().toISOString() }).eq('id', deviceId)
+      if (/^[0-9a-f-]{36}$/i.test(deviceId)) {
+        await apiPost('/api/me?action=revoke-device', { deviceId })
       }
       toast('Appareil déconnecté.', 'info')
     },
@@ -778,10 +704,7 @@ export function Provider({ children }: { children: ReactNode }) {
         ...s,
         notifications: s.notifications.map(n => (!id || n.id === id) ? { ...n, read: true } : n)
       }))
-      if (sb && session) {
-        const q = sb.from('notifications').update({ read_at: new Date().toISOString() }).eq('account_id', session.user.id)
-        ;(id && /^\d+$/.test(id) ? q.eq('id', +id) : q.is('read_at', null)).then(() => {}, () => {})
-      }
+      apiPost('/api/me?action=read-notifications', { id })
     },
     addRecentSearch: q => {
       const clean = q.trim()
@@ -792,10 +715,8 @@ export function Provider({ children }: { children: ReactNode }) {
       if (!requireAuth('signaler un contenu')) return false
       const clean = reason.trim()
       if (!clean) return false
-      if (sb && session) {
-        const { error } = await sb.from('reports').insert({ account_id: session.user.id, title_id: titleId, reason: clean, status: 'open' })
-        if (error) { toast(error.message, 'err'); return false }
-      }
+      const res = await apiPost('/api/me?action=report', { titleId, reason: clean })
+      if (!res.ok) { toast(res.data.error || 'Erreur d’envoi.', 'err'); return false }
       toast('Signalement transmis à l’équipe Kora. Merci.', 'ok')
       return true
     },

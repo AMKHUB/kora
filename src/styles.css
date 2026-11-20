@@ -612,6 +612,23 @@ small { font-size: 0.8125rem; }
   background: var(--s2); color: var(--primary);
   border: 1px solid rgba(242, 195, 52, 0.35);
 }
+.gate-icon.ok-icon {
+  color: var(--green);
+  border-color: rgba(47, 158, 60, 0.45);
+  background: rgba(47, 158, 60, 0.12);
+}
+.google-btn {
+  background: #FFFFFF; color: #111111; border: 1px solid #DCD8CE;
+  font-weight: 600;
+}
+.google-btn:hover { background: #F5F2EA; color: #111111; border-color: var(--primary); }
+.auth-sep {
+  display: flex; align-items: center; gap: 12px;
+  color: var(--mu); font-size: 0.82rem;
+}
+.auth-sep::before, .auth-sep::after {
+  content: ''; flex: 1; height: 1px; background: var(--line);
+}
 
 .empty-catalog-hero {
   min-height: 68vh; display: grid; place-items: center; padding: 48px 20px;

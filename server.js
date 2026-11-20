@@ -3,8 +3,13 @@ import compression from 'compression'
 import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { catalog } from './server/catalog.js'
+import catalogHandler from './api/catalog.js'
 import checkoutHandler from './api/checkout.js'
+import authHandler from './api/auth.js'
+import meHandler from './api/me.js'
+import playHandler from './api/play.js'
+import studioHandler from './api/studio.js'
+import adminHandler from './api/admin.js'
 
 const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist')
 const PORT = process.env.PORT || 3000
@@ -41,17 +46,19 @@ app.use((req, res, next) => {
   next()
 })
 app.use(compression())
-app.use(express.json({ limit: '64kb' }))
+app.use(express.json({ limit: '512kb' }))
 
-// Toutes les données et tous les secrets restent côté serveur.
-app.get('/api/catalog', (_req, res) => {
-  res.set('Cache-Control', 'public, max-age=300')
-  res.json(catalog)
-})
+// Toutes les clés API et appels base de données restent exclusivement côté serveur.
+app.get('/api/catalog', (req, res) => catalogHandler(req, res))
 app.get('/api/health', (_req, res) => {
   res.set('Cache-Control', 'no-store')
   res.json({ status: 'ok', service: 'kora', timestamp: new Date().toISOString() })
 })
+app.all('/api/auth', (req, res) => authHandler(req, res))
+app.all('/api/me', (req, res) => meHandler(req, res))
+app.post('/api/play', (req, res) => playHandler(req, res))
+app.all('/api/studio', (req, res) => studioHandler(req, res))
+app.all('/api/admin', (req, res) => adminHandler(req, res))
 app.post('/api/checkout', (req, res) => checkoutHandler(req, res))
 app.use('/api', (_req, res) => res.status(404).json({ error: 'not_found' }))
 

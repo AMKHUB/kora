@@ -3,7 +3,7 @@ import { Provider, useApp } from './store'
 import { BrandLogo, Icon, ProfileAvatar, ToastHost } from './ui'
 import { Categories, Detail, Home, MyList, NotFound, Profile, Search, Settings, Subscription } from './pages'
 import { Privacy, Terms } from './legal'
-import { Auth, AuthRequiredGate } from './auth'
+import { Auth, AuthRequiredGate, EmailConfirmPage, ResetPasswordPage } from './auth'
 
 const Admin = lazy(() => import('./admin').then(m => ({ default: m.Admin })))
 const Player = lazy(() => import('./player').then(m => ({ default: m.Player })))
@@ -154,7 +154,10 @@ function Routes() {
     case 'recherche': return <Search q0={q.get('q') || ''} />
     case 'categories': return <Categories kind={b} val={c} />
     case 'titre': return <Detail id={+b} />
-    case 'connexion': return <Auth recovery={q.has('recovery')} />
+    case 'connexion': return q.has('recovery') ? <ResetPasswordPage q={new URLSearchParams('step=new')} /> : <Auth q={q} />
+    case 'confirmation': return <EmailConfirmPage q={q} />
+    case 'reinitialisation':
+    case 'mot-de-passe-oublie': return <ResetPasswordPage q={q} />
     case 'confidentialite': return <Privacy />
     case 'cgu': return <Terms />
     case 'ma-liste':
