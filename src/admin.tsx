@@ -6,7 +6,7 @@ import { Icon } from './ui'
 const num = (n: unknown) => Number(n || 0).toLocaleString('fr-FR')
 const safe = (n: string) => n.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9._-]/g, '_')
 const STATUS: Record<string, string> = { draft: 'Brouillon', published: 'Publié', unpublished: 'Dépublié' }
-const TYPES: [string, string][] = [['film', 'Film'], ['series', 'Série'], ['doc', 'Documentaire'], ['short', 'Court-métrage']]
+const TYPES: [string, string][] = [['series', 'Série'], ['film', 'Film'], ['doc', 'Documentaire'], ['short', 'Court-métrage']]
 const AGES = ['Tous', '7+', '12+', '16+', '18+']
 const ACCESS_KINDS: [string, string][] = [['free', 'Gratuit'], ['premium', 'Premium'], ['rent', 'Location'], ['buy', 'Achat']]
 const COUNTRIES = ['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger', 'Nigeria', 'Ghana', 'Afrique du Sud', 'France', 'Belgique', 'Canada', 'États-Unis']
@@ -52,20 +52,26 @@ export function Admin({ q }: { q: URLSearchParams }) {
   }
 
   const tabs: [string, string][] = role === 'admin'
-    ? [['stats', 'Tableau de bord'], ['titles', 'Contenus'], ['rights', 'Droits par pays'], ['users', 'Comptes & Rôles'], ['reports', 'Signalements']]
+    ? [['stats', 'Tableau de bord'], ['titles', 'Contenus & Séries'], ['rights', 'Droits par pays'], ['users', 'Comptes & Rôles'], ['reports', 'Signalements']]
     : [['reports', 'Signalements']]
   const defaultTab = role === 'admin' ? 'stats' : 'reports'
   const tab = tabs.some(([k]) => k === q.get('t')) ? (q.get('t') as string) : defaultTab
   const id = q.get('id')
+  const presetType = q.get('type') || undefined
 
   return (
     <div className="page admin">
       <div className="page-head">
         <div>
           <h1>{role === 'admin' ? 'Espace administrateur' : 'Espace modération'}</h1>
-          <p className="mu">Gestion du catalogue, des droits territoriaux, des comptes et des signalements Kora.</p>
+          <p className="mu">Ajoutez vos séries avec couverture et synopsis, gérez les droits, les créateurs et les signalements.</p>
         </div>
-        {role === 'admin' && <a className="btn p" href="#/admin?t=titles&id=new"><Icon n="plus" s={18} />Nouveau contenu</a>}
+        {role === 'admin' && (
+          <div className="btns flush">
+            <a className="btn p" href="#/admin?t=titles&id=new&type=series"><Icon n="plus" s={18} />Nouvelle série</a>
+            <a className="btn" href="#/admin?t=titles&id=new&type=film"><Icon n="film" s={18} />Nouveau film</a>
+          </div>
+        )}
       </div>
 
       <div className="chips" role="tablist">
@@ -75,7 +81,7 @@ export function Admin({ q }: { q: URLSearchParams }) {
       </div>
 
       {tab === 'stats' && <Stats />}
-      {tab === 'titles' && (id ? <Editor key={id} id={id} /> : <List />)}
+      {tab === 'titles' && (id ? <Editor key={id + (presetType || '')} id={id} presetType={presetType} /> : <List />)}
       {tab === 'rights' && <RightsManager />}
       {tab === 'users' && <UsersManager />}
       {tab === 'reports' && <Reports />}
@@ -303,7 +309,7 @@ function UsersManager() {
   const changeRole = async (id: string, newRole: string) => {
     const res = await db().rpc('admin_set_role', { target_id: id, new_role: newRole })
     if (res.error) {
-      toast('Appliquez la migration supabase/migrations/20261120164500_kora_full_features.sql pour modifier les rôles depuis l’interface.', 'err')
+      toast(res.error.message, 'err')
       return
     }
     toast('Rôle mis à jour.', 'ok')
@@ -343,7 +349,9 @@ function List() {
   const { session, reloadCatalog, toast } = useApp()
   const [rows, setRows] = useState<any[]>([])
   const [q, setQ] = useState('')
-  const load = () => db().from('titles').select('id,title,type,year,country,status').order('id', { ascending: false }).then(({ data }) => setRows(data || []))
+  const [typeFilter, setTypeFilter] = useState('all')
+
+  const load = () => db().from('titles').select('id,title,type,year,country,status,poster_url,creator_id').order('id', { ascending: false }).then(({ data }) => setRows(data || []))
   useEffect(() => { load() }, [])
 
   const toggle = async (t: any) => {
@@ -355,42 +363,69 @@ function List() {
     reloadCatalog()
   }
 
-  const visible = rows.filter(t => !q.trim() || `${t.title} ${t.country} ${t.year}`.toLowerCase().includes(q.toLowerCase()))
+  const remove = async (t: any) => {
+    if (!confirm(`Supprimer définitivement « ${t.title} » ?`)) return
+    const { error } = await db().from('titles').delete().eq('id', t.id)
+    if (error) { toast(error.message, 'err'); return }
+    if (session) await logAudit(session.user.id, 'delete_title', 'titles', String(t.id))
+    toast('Contenu supprimé.', 'info')
+    load()
+    reloadCatalog()
+  }
+
+  const visible = rows.filter(t => {
+    if (typeFilter !== 'all' && t.type !== typeFilter) return false
+    if (q.trim() && !`${t.title} ${t.country} ${t.year}`.toLowerCase().includes(q.toLowerCase())) return false
+    return true
+  })
 
   return (
     <section className="panel">
       <div className="panel-head">
         <h2>Catalogue ({visible.length})</h2>
-        <input className="field narrow" type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrer un titre…" aria-label="Filtrer les contenus" />
+        <div className="inline" style={{ margin: 0 }}>
+          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filtrer par type">
+            <option value="all">Tous les types</option>
+            <option value="series">Séries</option>
+            <option value="film">Films</option>
+            <option value="doc">Documentaires</option>
+            <option value="short">Courts-métrages</option>
+          </select>
+          <input className="field narrow" type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrer un titre…" aria-label="Filtrer les contenus" />
+        </div>
       </div>
       <Table
-        head={['N°', 'Titre', 'Type', 'Année', 'Pays', 'Statut', 'Actions']}
+        head={['Couv.', 'Titre', 'Type', 'Année', 'Origine', 'Statut', 'Actions']}
         rows={visible.map(t => [
-          t.id,
+          t.poster_url ? <img className="mini-thumb" src={t.poster_url} alt="" /> : <span className="mini-thumb empty" />,
           t.title,
           TYPES.find(x => x[0] === t.type)?.[1],
           t.year,
-          t.country,
+          t.creator_id ? <span className="pill-spec">Kora Studio</span> : t.country,
           STATUS[t.status],
           <span className="acts">
             <a className="lnk" href={`#/admin?t=titles&id=${t.id}`}>Modifier</a>
             <button type="button" className="lnk" onClick={() => toggle(t)}>{t.status === 'published' ? 'Dépublier' : 'Publier'}</button>
+            <button type="button" className="lnk" onClick={() => remove(t)}>Supprimer</button>
           </span>
         ])}
-        empty="Aucun contenu."
+        empty="Aucun contenu dans cette catégorie. Cliquez sur « Nouvelle série » pour en ajouter une."
       />
     </section>
   )
 }
 
 type F = {
-  title: string; type: string; year: string; duration_min: string; country: string; original_language: string; age_rating: string; synopsis_long: string
-  status: string; is_trending: boolean; is_new: boolean; is_exclusive: boolean; available_from: string; available_until: string; poster_url: string
+  title: string; type: string; year: string; duration_min: string; country: string; original_language: string; age_rating: string
+  synopsis_short: string; synopsis_long: string
+  status: string; is_trending: boolean; is_new: boolean; is_exclusive: boolean; available_from: string; available_until: string
+  poster_url: string; backdrop_url: string
 }
-const blank: F = {
-  title: '', type: 'film', year: String(new Date().getFullYear()), duration_min: '', country: 'Mali', original_language: 'bm', age_rating: 'Tous', synopsis_long: '', status: 'draft',
-  is_trending: false, is_new: false, is_exclusive: false, available_from: '', available_until: '', poster_url: ''
-}
+const blank = (presetType?: string): F => ({
+  title: '', type: presetType || 'series', year: String(new Date().getFullYear()), duration_min: presetType === 'film' ? '95' : '45',
+  country: 'Mali', original_language: 'fr', age_rating: 'Tous', synopsis_short: '', synopsis_long: '', status: 'published',
+  is_trending: false, is_new: true, is_exclusive: false, available_from: '', available_until: '', poster_url: '', backdrop_url: ''
+})
 const names = (s: string) => [...new Set(s.split(',').map(x => x.trim()).filter(Boolean))]
 
 async function peopleIds(list: string[]): Promise<number[]> {
@@ -405,10 +440,10 @@ async function peopleIds(list: string[]): Promise<number[]> {
   return list.map(n => have.get(n) as number)
 }
 
-function Editor({ id }: { id: string }) {
+function Editor({ id, presetType }: { id: string; presetType?: string }) {
   const { session, reloadCatalog, toast } = useApp()
   const isNew = id === 'new'
-  const [f, setF] = useState<F>(blank)
+  const [f, setF] = useState<F>(() => blank(presetType))
   const [genres, setGenres] = useState<any[]>([])
   const [sel, setSel] = useState<number[]>([])
   const [langs, setLangs] = useState<any[]>([])
@@ -421,7 +456,14 @@ function Editor({ id }: { id: string }) {
   const [eps, setEps] = useState<any[]>([])
   const [newEpSeason, setNewEpSeason] = useState('1')
   const [newEpTitle, setNewEpTitle] = useState('')
+  const [newEpSynopsis, setNewEpSynopsis] = useState('')
   const [newEpDur, setNewEpDur] = useState('45')
+  const [newEpIntro, setNewEpIntro] = useState('75')
+  // Fichiers couverture & bannière sélectionnés même avant la 1re sauvegarde !
+  const [pendingPoster, setPendingPoster] = useState<File | null>(null)
+  const [pendingPosterPreview, setPendingPosterPreview] = useState('')
+  const [pendingBackdrop, setPendingBackdrop] = useState<File | null>(null)
+  const [pendingBackdropPreview, setPendingBackdropPreview] = useState('')
 
   const up = (k: keyof F, v: unknown) => setF(x => ({ ...x, [k]: v }))
 
@@ -429,11 +471,14 @@ function Editor({ id }: { id: string }) {
     const [g, l] = await Promise.all([db().from('genres').select('id,name').order('name'), db().from('languages').select('code,name').order('name')])
     setGenres(g.data || []); setLangs(l.data || [])
     if (isNew) return
-    const { data: t } = await db().from('titles').select('*, title_genres(genre_id), title_people(role,position,people(name)), video_assets(id,size_bytes), seasons(id,number, episodes(id,number,title,duration_min,video_assets(id)))').eq('id', id).maybeSingle()
+    const { data: t } = await db().from('titles')
+      .select('*, title_genres(genre_id), title_people(role,position,people(name)), video_assets(id,size_bytes), seasons(id,number, episodes(id,number,title,synopsis,duration_min,intro_end_sec,video_assets(id)))')
+      .eq('id', id).maybeSingle()
     if (!t) return setMsg('Contenu introuvable.')
     setF({
-      title: t.title, type: t.type, year: String(t.year ?? ''), duration_min: String(t.duration_min ?? ''), country: t.country, original_language: t.original_language || '', age_rating: t.age_rating,
-      synopsis_long: t.synopsis_long || '', status: t.status, is_trending: t.is_trending, is_new: t.is_new, is_exclusive: t.is_exclusive, available_from: t.available_from || '', available_until: t.available_until || '', poster_url: t.poster_url || ''
+      title: t.title, type: t.type, year: String(t.year ?? ''), duration_min: String(t.duration_min ?? ''), country: t.country, original_language: t.original_language || 'fr', age_rating: t.age_rating,
+      synopsis_short: t.synopsis_short || '', synopsis_long: t.synopsis_long || '', status: t.status, is_trending: t.is_trending, is_new: t.is_new, is_exclusive: t.is_exclusive,
+      available_from: t.available_from || '', available_until: t.available_until || '', poster_url: t.poster_url || '', backdrop_url: t.backdrop_url || ''
     })
     setSel(t.title_genres.map((x: any) => x.genre_id))
     setDir(t.title_people.filter((x: any) => x.role === 'director').map((x: any) => x.people.name).join(', '))
@@ -445,18 +490,46 @@ function Editor({ id }: { id: string }) {
   }
   useEffect(() => { load() }, [])
 
+  const uploadImageFile = async (tid: number, file: File, kind: 'poster' | 'backdrop'): Promise<string | null> => {
+    const path = `${tid}/${kind}-${Date.now()}-${safe(file.name)}`
+    const { error } = await db().storage.from('posters').upload(path, file, { contentType: file.type })
+    if (error) { setMsg(error.message); return null }
+    return db().storage.from('posters').getPublicUrl(path).data.publicUrl
+  }
+
   const save = async () => {
     if (!f.title.trim()) return setMsg('Le titre est obligatoire.')
     setBusy(true); setMsg('')
     const row = {
-      title: f.title.trim(), type: f.type, year: f.year ? +f.year : null, duration_min: f.duration_min ? +f.duration_min : null, country: f.country.trim() || 'Mali',
-      original_language: f.original_language || null, age_rating: f.age_rating, synopsis_short: f.synopsis_long.slice(0, 180), synopsis_long: f.synopsis_long, status: f.status,
-      is_trending: f.is_trending, is_new: f.is_new, is_exclusive: f.is_exclusive, available_from: f.available_from || null, available_until: f.available_until || null,
-      poster_url: f.poster_url || null, updated_at: new Date().toISOString()
+      title: f.title.trim(), type: f.type, year: f.year ? +f.year : null, duration_min: f.duration_min ? +f.duration_min : null,
+      country: f.country.trim() || 'Mali', original_language: f.original_language || null, age_rating: f.age_rating,
+      synopsis_short: (f.synopsis_short.trim() || f.synopsis_long.trim()).slice(0, 180),
+      synopsis_long: f.synopsis_long.trim(),
+      status: f.status, is_trending: f.is_trending, is_new: f.is_new, is_exclusive: f.is_exclusive,
+      available_from: f.available_from || null, available_until: f.available_until || null,
+      poster_url: f.poster_url.trim() || null, backdrop_url: f.backdrop_url.trim() || null,
+      updated_at: new Date().toISOString()
     }
     const r = isNew ? await db().from('titles').insert(row).select('id').single() : await db().from('titles').update(row).eq('id', id).select('id').single()
     if (r.error) { setBusy(false); return setMsg(r.error.message) }
     const tid = r.data.id as number
+
+    // Téléversement automatique des pages de couverture sélectionnées
+    const mediaPatch: Record<string, string> = {}
+    if (pendingPoster) {
+      const url = await uploadImageFile(tid, pendingPoster, 'poster')
+      if (url) { mediaPatch.poster_url = url; up('poster_url', url) }
+      setPendingPoster(null); setPendingPosterPreview('')
+    }
+    if (pendingBackdrop) {
+      const url = await uploadImageFile(tid, pendingBackdrop, 'backdrop')
+      if (url) { mediaPatch.backdrop_url = url; up('backdrop_url', url) }
+      setPendingBackdrop(null); setPendingBackdropPreview('')
+    }
+    if (Object.keys(mediaPatch).length) {
+      await db().from('titles').update(mediaPatch).eq('id', tid)
+    }
+
     await db().from('title_genres').delete().eq('title_id', tid)
     if (sel.length) await db().from('title_genres').insert(sel.map(genre_id => ({ title_id: tid, genre_id })))
     await db().from('title_people').delete().eq('title_id', tid)
@@ -465,7 +538,7 @@ function Editor({ id }: { id: string }) {
     if (links.length) await db().from('title_people').insert(links)
     if (session) await logAudit(session.user.id, isNew ? 'create_title' : 'update_title', 'titles', String(tid))
     setBusy(false)
-    toast('Contenu enregistré.', 'ok')
+    toast(f.type === 'series' ? 'Série enregistrée avec sa couverture et son synopsis.' : 'Contenu enregistré.', 'ok')
     reloadCatalog()
     if (isNew) location.hash = `#/admin?t=titles&id=${tid}`
   }
@@ -497,26 +570,31 @@ function Editor({ id }: { id: string }) {
       season_id: seasonRow.id,
       number: nextNum,
       title: newEpTitle.trim(),
+      synopsis: newEpSynopsis.trim() || null,
       duration_min: +newEpDur || 45,
-      intro_end_sec: 75
+      intro_end_sec: +newEpIntro || 75
     })
     setBusy(false)
     if (error) return setMsg(error.message)
-    setNewEpTitle('')
+    setNewEpTitle(''); setNewEpSynopsis('')
     toast(`Épisode S${sNum}E${nextNum} ajouté.`, 'ok')
+    reloadCatalog()
     load()
   }
 
-  const uploadPoster = async (file?: File) => {
-    if (!file) return
-    setBusy(true); setMsg('Envoi de l’affiche…')
-    const path = `${id}/${Date.now()}-${safe(file.name)}`
-    const { error } = await db().storage.from('posters').upload(path, file, { contentType: file.type })
-    if (error) { setBusy(false); return setMsg(error.message) }
-    const url = db().storage.from('posters').getPublicUrl(path).data.publicUrl
-    await db().from('titles').update({ poster_url: url }).eq('id', id)
-    up('poster_url', url); setBusy(false); setMsg('Affiche envoyée.')
+  const deleteEpisode = async (epId: number) => {
+    if (!confirm('Supprimer cet épisode ?')) return
+    await db().from('episodes').delete().eq('id', epId)
+    toast('Épisode supprimé.', 'info')
     reloadCatalog()
+    load()
+  }
+
+  const pickImage = (file: File | undefined, kind: 'poster' | 'backdrop') => {
+    if (!file) return
+    const preview = URL.createObjectURL(file)
+    if (kind === 'poster') { setPendingPoster(file); setPendingPosterPreview(preview) }
+    else { setPendingBackdrop(file); setPendingBackdropPreview(preview) }
   }
 
   const uploadVideo = async (file: File | undefined, target: { title_id?: number; episode_id?: number }) => {
@@ -535,23 +613,50 @@ function Editor({ id }: { id: string }) {
     <label className="chk"><input type="checkbox" checked={f[k]} onChange={e => up(k, e.target.checked)} />{t}</label>
   )
 
+  const posterPreview = pendingPosterPreview || f.poster_url
+  const backdropPreview = pendingBackdropPreview || f.backdrop_url
+
   return (
     <div className="panel form">
       <a className="lnk" href="#/admin?t=titles">← Retour aux contenus</a>
-      <h2>{isNew ? 'Nouveau contenu' : f.title}</h2>
-      <label>Titre<input className="field" value={f.title} onChange={e => up('title', e.target.value)} /></label>
+      <h2>{isNew ? (f.type === 'series' ? 'Ajouter une nouvelle série' : 'Nouveau contenu') : f.title}</h2>
+
+      <label>Titre<input className="field" value={f.title} onChange={e => up('title', e.target.value)} placeholder="Ex. Les Chroniques de Bamako" /></label>
       <div className="inline">
         <label>Type<select value={f.type} onChange={e => up('type', e.target.value)}>{TYPES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
         <label>Année<input className="field narrow" inputMode="numeric" value={f.year} onChange={e => up('year', e.target.value)} /></label>
-        <label>Durée (min)<input className="field narrow" inputMode="numeric" value={f.duration_min} onChange={e => up('duration_min', e.target.value)} /></label>
+        <label>Durée moy. (min)<input className="field narrow" inputMode="numeric" value={f.duration_min} onChange={e => up('duration_min', e.target.value)} /></label>
         <label>Âge<select value={f.age_rating} onChange={e => up('age_rating', e.target.value)}>{AGES.map(a => <option key={a}>{a}</option>)}</select></label>
         <label>Statut<select value={f.status} onChange={e => up('status', e.target.value)}>{Object.entries(STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
       </div>
+
+      {/* Pages de couverture (Affiche 2:3 + Bannière 16:9) dès la création */}
+      <div className="cover-upload-grid">
+        <div className="cover-box">
+          <strong>Page de couverture (Affiche 2:3)</strong>
+          {posterPreview ? <img className="thumb" src={posterPreview} alt="Aperçu couverture" /> : <div className="thumb placeholder">Aucune affiche</div>}
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => pickImage(e.target.files?.[0], 'poster')} />
+          <input className="field" value={f.poster_url} onChange={e => up('poster_url', e.target.value)} placeholder="…ou coller une URL d’image" aria-label="URL de la couverture" />
+        </div>
+        <div className="cover-box">
+          <strong>Bannière large (16:9, facultatif)</strong>
+          {backdropPreview ? <img className="thumb wide-thumb" src={backdropPreview} alt="Aperçu bannière" /> : <div className="thumb wide-thumb placeholder">Aucune bannière</div>}
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => pickImage(e.target.files?.[0], 'backdrop')} />
+          <input className="field" value={f.backdrop_url} onChange={e => up('backdrop_url', e.target.value)} placeholder="…ou coller une URL de bannière" aria-label="URL de la bannière" />
+        </div>
+      </div>
+
+      <label>Accroche / Synopsis court (max 180 car.)
+        <input className="field" maxLength={180} value={f.synopsis_short} onChange={e => up('synopsis_short', e.target.value)} placeholder="Résumé court affiché en une de l’accueil…" />
+      </label>
+      <label>Synopsis complet
+        <textarea className="field" rows={5} value={f.synopsis_long} onChange={e => up('synopsis_long', e.target.value)} placeholder="Racontez l’histoire complète de la série ou du film…" />
+      </label>
+
       <div className="inline">
         <label>Pays<input className="field" value={f.country} onChange={e => up('country', e.target.value)} /></label>
         <label>Langue originale<select value={f.original_language} onChange={e => up('original_language', e.target.value)}>{langs.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select></label>
       </div>
-      <label>Synopsis<textarea className="field" rows={5} value={f.synopsis_long} onChange={e => up('synopsis_long', e.target.value)} /></label>
       <label>Réalisation (noms séparés par des virgules)<input className="field" value={dir} onChange={e => setDir(e.target.value)} /></label>
       <label>Distribution (noms séparés par des virgules)<input className="field" value={cast} onChange={e => setCast(e.target.value)} /></label>
       <div className="chips" role="group" aria-label="Genres">
@@ -565,45 +670,54 @@ function Editor({ id }: { id: string }) {
         <label>jusqu’au<input className="field narrow" type="date" value={f.available_until} onChange={e => up('available_until', e.target.value)} /></label>
       </div>
       <div className="btns">
-        <button type="button" className="btn p" disabled={busy} onClick={save}>Enregistrer</button>
+        <button type="button" className="btn p" disabled={busy} onClick={save}>
+          {busy ? 'Enregistrement…' : isNew ? 'Créer et enregistrer' : 'Enregistrer les modifications'}
+        </button>
         {!isNew && <button type="button" className="btn danger" disabled={busy} onClick={del}>Supprimer</button>}
       </div>
       {msg && <p role="status">{msg}</p>}
 
       {isNew ? (
-        <p className="mu">Enregistrez d’abord le contenu pour pouvoir téléverser l’affiche, la vidéo ou les épisodes.</p>
+        <p className="mu">Enregistrez d’abord cette fiche pour ajouter les saisons, épisodes et fichiers vidéo.</p>
       ) : (
         <>
           <div className="divider" />
-          <h3>Médias & Fichiers</h3>
-          {f.poster_url && <img className="thumb" src={f.poster_url} alt="Affiche actuelle" />}
-          <label>Affiche (JPG, PNG ou WebP, 5 Mo max)
-            <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => uploadPoster(e.target.files?.[0])} />
-          </label>
-
           {f.type === 'series' ? (
             <>
-              <h3>Épisodes ({eps.length})</h3>
+              <h3>Saisons & Épisodes ({eps.length})</h3>
               <div className="inline">
                 <label>Saison<input className="field narrow" inputMode="numeric" value={newEpSeason} onChange={e => setNewEpSeason(e.target.value)} /></label>
-                <label>Titre de l’épisode<input className="field" value={newEpTitle} onChange={e => setNewEpTitle(e.target.value)} placeholder="Ex. L’Aube sur Bamako" /></label>
+                <label>Titre de l’épisode<input className="field" value={newEpTitle} onChange={e => setNewEpTitle(e.target.value)} placeholder="Ex. Épisode 1 — Le départ" /></label>
                 <label>Durée (min)<input className="field narrow" inputMode="numeric" value={newEpDur} onChange={e => setNewEpDur(e.target.value)} /></label>
-                <button type="button" className="btn" disabled={busy} onClick={addEpisode}>Ajouter l’épisode</button>
+                <label>Fin intro (s)<input className="field narrow" inputMode="numeric" value={newEpIntro} onChange={e => setNewEpIntro(e.target.value)} /></label>
+              </div>
+              <label>Synopsis de l’épisode
+                <textarea className="field" rows={2} value={newEpSynopsis} onChange={e => setNewEpSynopsis(e.target.value)} placeholder="Résumé de cet épisode…" />
+              </label>
+              <div className="btns">
+                <button type="button" className="btn p" disabled={busy || !newEpTitle.trim()} onClick={addEpisode}>
+                  <Icon n="plus" s={18} />Ajouter l’épisode
+                </button>
               </div>
               <ol className="eps">
                 {eps.map(e => (
                   <li key={e.id}>
                     <span className="ep-num">S{e.season}.{e.number}</span>
-                    <strong>{e.title}</strong>
-                    <small className="mu">{e.video_assets?.length ? 'vidéo prête' : 'sans vidéo'}</small>
+                    <div className="ep-body">
+                      <strong>{e.title} ({e.duration_min} min)</strong>
+                      {e.synopsis && <p className="mu">{e.synopsis}</p>}
+                      <small className="mu">{e.video_assets?.length ? 'Vidéo prête en ligne' : 'Aucune vidéo téléversée'}</small>
+                    </div>
                     <input type="file" accept="video/mp4,video/webm,video/quicktime" disabled={busy} onChange={ev => uploadVideo(ev.target.files?.[0], { episode_id: e.id })} aria-label={`Vidéo de l’épisode ${e.number}`} />
+                    <button type="button" className="lnk" onClick={() => deleteEpisode(e.id)}>Supprimer</button>
                   </li>
                 ))}
               </ol>
             </>
           ) : (
             <>
-              <label>Fichier vidéo du film (MP4, WebM ou MOV)
+              <h3>Fichier vidéo du film</h3>
+              <label>Vidéo (MP4, WebM ou MOV)
                 <input type="file" accept="video/mp4,video/webm,video/quicktime" disabled={busy} onChange={e => uploadVideo(e.target.files?.[0], { title_id: +id })} />
               </label>
               <p className="mu">{vid ? `Vidéo en ligne (${Math.round((vid.size_bytes || 0) / 1048576)} Mo).` : 'Aucune vidéo téléversée pour le moment.'}</p>

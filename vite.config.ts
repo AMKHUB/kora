@@ -1,5 +1,8 @@
 import { defineConfig } from 'vite'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 
+const root = path.dirname(fileURLToPath(import.meta.url))
 const site = process.env.SITE_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL : '')
 const pl = process.env.PLAUSIBLE_DOMAIN
 // Analytics sans cookie : Plausible si PLAUSIBLE_DOMAIN est défini, sinon Vercel Web Analytics sur Vercel.
@@ -20,6 +23,10 @@ export default defineConfig({
     target: 'es2020',
     sourcemap: false,
     rollupOptions: {
+      input: {
+        main: path.resolve(root, 'index.html'),
+        studio: path.resolve(root, 'studio.html')
+      },
       output: {
         manualChunks: {
           react: ['react', 'react-dom'],

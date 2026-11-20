@@ -605,6 +605,20 @@ small { font-size: 0.8125rem; }
 
 /* Admin */
 .thumb { width: 124px; aspect-ratio: 2/3; object-fit: cover; border-radius: var(--rad-card); border: 1px solid var(--line); }
+.thumb.wide-thumb { width: 220px; aspect-ratio: 16/9; }
+.thumb.placeholder { display: grid; place-items: center; background: var(--bg); color: var(--mu); font-size: 0.78rem; text-align: center; padding: 8px; }
+.mini-thumb { display: inline-block; width: 34px; height: 50px; object-fit: cover; border-radius: 4px; border: 1px solid var(--line); background: var(--s2); vertical-align: middle; }
+.cover-upload-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.cover-box { display: grid; gap: 8px; padding: 14px; border-radius: var(--rad-card); background: var(--bg); border: 1px solid var(--line); align-content: start; }
+.profile-hero-id { display: flex; align-items: center; gap: 14px; }
+.sim-banner {
+  display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; margin-bottom: 18px;
+  border-radius: var(--rad-card); background: rgba(242, 195, 52, 0.1); border: 1px solid rgba(242, 195, 52, 0.4);
+  font-size: 0.92rem;
+}
+.sim-banner svg { color: var(--primary); flex-shrink: 0; margin-top: 2px; }
+.sim-banner code { padding: 1px 6px; border-radius: 3px; background: var(--s2); font-size: 0.85em; }
+.plan-actions { display: grid; gap: 8px; justify-items: center; }
 .stats {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
   gap: 12px; margin: 20px 0;

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Provider, useApp } from './store'
 import { BrandLogo, Icon, ProfileAvatar, ToastHost } from './ui'
-import { Categories, Detail, Home, MyList, NotFound, Profile, Search, Subscription } from './pages'
+import { Categories, Detail, Home, MyList, NotFound, Profile, Search, Settings, Subscription } from './pages'
 import { Privacy, Terms } from './legal'
 import { Auth } from './auth'
 
@@ -73,9 +73,18 @@ function Sidebar() {
             {k === 'profil' && unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
           </a>
         ))}
+        <a href="#/parametres" className={'nav-extra' + (cur === 'parametres' ? ' on' : '')} aria-current={cur === 'parametres' ? 'page' : undefined}>
+          <Icon n="gear" s={20} />
+          <span>Paramètres</span>
+          {unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
+        </a>
         <a href="#/abonnement" className={'nav-extra' + (cur === 'abonnement' ? ' on' : '')} aria-current={cur === 'abonnement' ? 'page' : undefined}>
           <Icon n="crown" s={20} />
           <span>{isPremium ? 'Mon offre' : 'Premium'}</span>
+        </a>
+        <a href="/studio/" className="nav-extra">
+          <Icon n="studio" s={20} />
+          <span>Kora Studio</span>
         </a>
         {(role === 'admin' || role === 'moderator') && (
           <a href="#/admin" className={'nav-extra' + (cur === 'admin' ? ' on' : '')} aria-current={cur === 'admin' ? 'page' : undefined}>
@@ -117,6 +126,7 @@ function Routes() {
     case 'categories': return <Categories kind={b} val={c} />
     case 'ma-liste': return <MyList />
     case 'profil': return <Profile />
+    case 'parametres': return <Settings />
     case 'titre': return <Detail id={+b} />
     case 'lire': return <Suspense fallback={<p className="page mu">Chargement du lecteur…</p>}><Player key={b + location.hash} id={+b} q={q} /></Suspense>
     case 'abonnement': return <Subscription />

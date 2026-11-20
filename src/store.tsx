@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { sb } from './supabase'
+import { IS_BILLING_SIMULATION, processPaymentCheckout } from './billing'
 
 export type Episode = {
   id?: number
@@ -227,27 +228,27 @@ const defaultNotifications: AppNotification[] = [
   {
     id: 'n-welcome',
     title: 'Bienvenue sur Kora',
-    body: 'Découvrez Le Griot de Ségou, Nuits de Bamako et les grands classiques restaurés du cinéma africain.',
+    body: 'Découvrez Le Griot de Ségou, Paris-Kayes et les grands classiques restaurés du cinéma africain.',
     kind: 'release',
     link: '#/titre/1',
     read: false,
     date: new Date().toISOString()
   },
   {
-    id: 'n-s2',
-    title: 'Nouveauté 2025 : Nuits de Bamako (Saison 2)',
-    body: 'Les 6 nouveaux épisodes de la série originale sont disponibles dès maintenant.',
-    kind: 'release',
-    link: '#/titre/2',
+    id: 'n-studio',
+    title: 'Nouveau : Kora Studio pour les créateurs',
+    body: 'Réalisateurs et producteurs : mettez en ligne vos propres séries et films directement sur Kora.',
+    kind: 'info',
+    link: '/studio/',
     read: false,
-    date: new Date(Date.now() - 86400000 * 2).toISOString()
+    date: new Date(Date.now() - 86400000).toISOString()
   }
 ]
 
 const init: State = {
   profiles: [
-    { id: 'p1', name: 'Moi', avatar: 'gold', kid: false, list: [2, 20], hist: { 1: 2400, 5: 1100 }, epHist: { '2:1:1': 920 }, rate: { 1: 'love' } },
-    { id: 'p2', name: 'Enfants', avatar: 'emerald', kid: true, list: [17, 21], hist: {}, epHist: {}, rate: {} }
+    { id: 'p1', name: 'Moi', avatar: 'gold', kid: false, list: [1, 20], hist: { 1: 2400, 5: 1100 }, epHist: {}, rate: { 1: 'love' } },
+    { id: 'p2', name: 'Enfants', avatar: 'emerald', kid: true, list: [17], hist: {}, epHist: {}, rate: {} }
   ],
   cur: 'p1',
   plan: 'free',
@@ -298,6 +299,69 @@ function loadState(): State {
 }
 
 const TYPES: Record<string, Item['type']> = { film: 'film', series: 'serie', doc: 'doc', short: 'court' }
+
+function loadLocalStudioItems(): Item[] {
+  try {
+    const raw = localStorage.getItem('kora-studio-items')
+    if (!raw) return []
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((x: any) => x && x.status === 'published').map((x: any) => ({
+      id: Number(x.id),
+      title: x.title || 'Sans titre',
+      type: TYPES[x.type] || x.type || 'serie',
+      year: Number(x.year) || new Date().getFullYear(),
+      country: x.country || 'Mali',
+      langs: Array.isArray(x.langs) && x.langs.length ? x.langs : ['Français'],
+      subtitles: ['Français', 'English'],
+      genres: Array.isArray(x.genres) && x.genres.length ? x.genres : ['Drame'],
+      age: x.age || 'Tous',
+      dur: Number(x.dur) || 45,
+      seasons: x.seasons || (x.episodesBySeason ? Object.keys(x.episodesBySeason).length : undefined),
+      episodesBySeason: x.episodesBySeason,
+      director: x.director || x.channelName || 'Créateur Kora',
+      cast: Array.isArray(x.cast) ? x.cast : [],
+      synopsis: x.synopsis || '',
+      poster: x.poster || undefined,
+      backdrop: x.backdrop || undefined,
+      quality: 'HD',
+      badge: x.channelName ? `Studio · ${x.channelName}` : 'Kora Studio',
+      isNew: true
+    }))
+  } catch {
+    return []
+  }
+}
+
+function buildCatalogFromItems(rawItems: Item[]): Catalog {
+  const localItems = loadLocalStudioItems()
+  const existingIds = new Set(rawItems.map(i => i.id))
+  const items = [...localItems.filter(l => !existingIds.has(l.id)), ...rawItems]
+  const ids = (f: (i: Item) => boolean) => items.filter(f).map(i => i.id)
+  const flag = (k: 'isTrending' | 'isNew' | 'isExclusive'): number[] => items.filter(t => t[k]).map(t => t.id)
+  const trending = flag('isTrending')
+  const excl = flag('isExclusive')
+  const news = flag('isNew')
+  const heroes = [...new Set([...excl, ...trending, ...items.map(i => i.id)])].slice(0, 5)
+  return {
+    items,
+    hero: heroes[0] || items[0]?.id || 0,
+    heroes,
+    rows: {
+      top10: [...new Set([...trending, ...excl, ...news, ...items.map(i => i.id)])].slice(0, 10),
+      trending: trending.length ? trending : ids(i => i.country === 'Mali'),
+      new: news.length ? news : ids(i => i.year >= 2024),
+      malifilms: ids(i => i.country === 'Mali' && i.type === 'film'),
+      series: ids(i => i.type === 'serie'),
+      africa: ids(i => i.country !== 'Mali'),
+      docs: ids(i => i.type === 'doc'),
+      shorts: ids(i => i.type === 'court'),
+      discover: ids(i => i.country !== 'Mali' && i.type === 'film'),
+      classics: ids(i => i.year < 2000),
+      pick: ids(i => !trending.includes(i.id)).slice(0, 8)
+    }
+  }
+}
 
 async function loadCatalog(): Promise<Catalog> {
   let fallback: Catalog | null = null
@@ -351,33 +415,11 @@ async function loadCatalog(): Promise<Catalog> {
           isExclusive: !!t.is_exclusive
         }
       })
-      const ids = (f: (i: Item) => boolean) => items.filter(f).map(i => i.id)
-      const flag = (k: 'isTrending' | 'isNew' | 'isExclusive'): number[] => items.filter(t => t[k]).map(t => t.id)
-      const trending = flag('isTrending')
-      const excl = flag('isExclusive')
-      const news = flag('isNew')
-      const heroes = [...new Set([...excl, ...trending, ...items.map(i => i.id)])].slice(0, 5)
-      return {
-        items,
-        hero: heroes[0] || items[0].id,
-        heroes,
-        rows: {
-          top10: [...new Set([...trending, ...excl, ...news, ...items.map(i => i.id)])].slice(0, 10),
-          trending: trending.length ? trending : ids(i => i.country === 'Mali'),
-          new: news.length ? news : ids(i => i.year >= 2024),
-          malifilms: ids(i => i.country === 'Mali' && i.type === 'film'),
-          series: ids(i => i.type === 'serie'),
-          africa: ids(i => i.country !== 'Mali'),
-          docs: ids(i => i.type === 'doc'),
-          shorts: ids(i => i.type === 'court'),
-          discover: ids(i => i.country !== 'Mali' && i.type === 'film'),
-          classics: ids(i => i.year < 2000),
-          pick: ids(i => !trending.includes(i.id)).slice(0, 8)
-        }
-      }
+      return buildCatalogFromItems(items)
     }
   }
-  return getFallback()
+  const fb = await getFallback()
+  return buildCatalogFromItems(fb.items || [])
 }
 
 type Ctx = {
@@ -405,7 +447,7 @@ type Ctx = {
   deleteProfile: (id: string) => Promise<void>
   selectProfile: (id: string) => void
   verifyProfilePin: (profileId: string, pin: string) => Promise<boolean>
-  subscribePlan: (planId: PlanId, billing: 'month' | 'year', provider: string) => Promise<void>
+  subscribePlan: (planId: PlanId, billing: 'month' | 'year', provider: string, customerRef?: string) => Promise<{ ok: boolean; error?: string }>
   cancelSubscription: (cancel: boolean) => void
   updateAccount: (name: string, country: string) => Promise<void>
   revokeDevice: (deviceId: string) => Promise<void>
@@ -693,20 +735,35 @@ export function Provider({ children }: { children: ReactNode }) {
       const hashed = await hashPin(pin)
       return hashed === p.pinHash
     },
-    subscribePlan: async (planId, billing, provider) => {
+    subscribePlan: async (planId, billing, provider, customerRef = '') => {
       const plan = PLANS.find(p => p.id === planId)!
       const amount = billing === 'year' ? plan.priceYear : plan.priceMonth
+      let ref = `SIM-${Date.now().toString(36).toUpperCase()}`
+
+      if (planId !== 'free' && !IS_BILLING_SIMULATION) {
+        const res = await processPaymentCheckout({
+          planId,
+          billing,
+          provider: provider as 'Orange Money' | 'Moov Money' | 'Wave' | 'Carte bancaire',
+          customerRef
+        })
+        if (!res.ok) {
+          toast(res.error, 'err')
+          return { ok: false, error: res.error }
+        }
+        ref = res.reference
+      }
+
       const days = billing === 'year' ? 365 : 30
       const periodEnd = new Date(Date.now() + 86400000 * days).toISOString()
-      const ref = `KR-${Date.now().toString(36).toUpperCase()}`
       const inv: Invoice | null = amount > 0 ? {
         id: ref,
         date: new Date().toISOString(),
         planId,
         planName: plan.name,
         billing,
-        amountXof: amount,
-        provider,
+        amountXof: IS_BILLING_SIMULATION ? 0 : amount,
+        provider: IS_BILLING_SIMULATION ? `${provider} (simulation)` : provider,
         reference: ref,
         status: 'paid'
       } : null
@@ -722,14 +779,24 @@ export function Provider({ children }: { children: ReactNode }) {
           title: planId === 'free' ? 'Retour à la formule Gratuit' : `Bienvenue dans Kora ${plan.name}`,
           body: planId === 'free'
             ? 'Votre compte est repassé sur la formule gratuite.'
-            : `Votre formule ${plan.name} (${amount.toLocaleString('fr-FR')} FCFA) est active sans publicité.`,
+            : IS_BILLING_SIMULATION
+              ? `Votre formule ${plan.name} est activée gratuitement (mode simulation).`
+              : `Votre formule ${plan.name} (${amount.toLocaleString('fr-FR')} FCFA) est active sans publicité.`,
           kind: 'account',
           link: '#/abonnement',
           read: false,
           date: new Date().toISOString()
         }, ...s.notifications]
       }))
-      toast(planId === 'free' ? 'Formule gratuite activée.' : `Kora ${plan.name} activé !`, 'ok')
+      toast(
+        planId === 'free'
+          ? 'Formule gratuite activée.'
+          : IS_BILLING_SIMULATION
+            ? `Kora ${plan.name} activé gratuitement (simulation) !`
+            : `Kora ${plan.name} activé !`,
+        'ok'
+      )
+      return { ok: true }
     },
     cancelSubscription: cancel => {
       setSt(s => ({ ...s, cancelAtPeriodEnd: cancel }))

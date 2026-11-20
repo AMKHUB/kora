@@ -169,6 +169,51 @@ export function Auth() {
   )
 }
 
+export function AccountSummary() {
+  const { session, role, signOut } = useApp()
+
+  if (!sb) {
+    return (
+      <section className="panel account-cta">
+        <div>
+          <h2>Compte local</h2>
+          <p className="mu">Vos profils et historiques sont sauvegardés sur cet appareil.</p>
+        </div>
+        <a className="btn" href="#/parametres"><Icon n="gear" s={18} />Paramètres</a>
+      </section>
+    )
+  }
+
+  if (!session) {
+    return (
+      <section className="panel account-cta">
+        <div>
+          <h2>Synchronisez votre foyer Kora</h2>
+          <p className="mu">Connectez-vous pour retrouver vos profils, votre liste et publier sur Kora Studio.</p>
+        </div>
+        <a className="btn p" href="#/connexion"><Icon n="user" s={18} />Se connecter</a>
+      </section>
+    )
+  }
+
+  const u = session.user
+  return (
+    <section className="panel account-cta">
+      <div>
+        <h2>Mon compte</h2>
+        <p className="mu">{u.email || u.phone} · <strong>{role === 'admin' ? 'Administrateur' : role === 'moderator' ? 'Modérateur' : 'Membre'}</strong></p>
+      </div>
+      <div className="btns flush">
+        {(role === 'admin' || role === 'moderator') && (
+          <a className="btn p" href="#/admin"><Icon n="shield" s={18} />{role === 'admin' ? 'Admin' : 'Modération'}</a>
+        )}
+        <a className="btn" href="/studio/"><Icon n="studio" s={18} />Kora Studio</a>
+        <button type="button" className="btn" onClick={signOut}>Déconnexion</button>
+      </div>
+    </section>
+  )
+}
+
 export function AccountBox() {
   const { session, role, signOut, st, updateAccount, toast } = useApp()
   const [name, setName] = useState(st.accountName || '')
@@ -189,8 +234,8 @@ export function AccountBox() {
     return (
       <section className="panel account-cta">
         <div>
-          <h2>Synchronisez votre foyer Kora</h2>
-          <p className="mu">Connectez-vous pour retrouver vos profils, votre liste et votre abonnement sur tous vos écrans.</p>
+          <h2>Compte non connecté</h2>
+          <p className="mu">Connectez-vous pour synchroniser vos réglages, votre pays de résidence et vos appareils.</p>
         </div>
         <a className="btn p" href="#/connexion"><Icon n="user" s={18} />Se connecter ou créer un compte</a>
       </section>
@@ -202,7 +247,7 @@ export function AccountBox() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2>Compte</h2>
+          <h2>Compte & Sécurité</h2>
           <p className="mu">{u.email || u.phone} · Rôle : <strong>{role === 'admin' ? 'Administrateur' : role === 'moderator' ? 'Modérateur' : 'Membre'}</strong></p>
         </div>
         <div className="btns flush">

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AVATARS, Episode, Item, PLANS, PlanId, Profile as ProfileType, ThemeMode, useApp } from './store'
 import { BrandLogo, Card, Icon, Meta, Modal, PinModal, Poster, ProfileAvatar, Row } from './ui'
-import { AccountBox } from './auth'
+import { AccountBox, AccountSummary } from './auth'
+import { IS_BILLING_SIMULATION } from './billing'
 
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 const hay = (i: Item) => norm([i.title, i.director, i.country, i.type, i.synopsis, ...i.cast, ...i.langs, ...i.genres].join(' '))
@@ -43,7 +44,9 @@ function Footer() {
       <nav className="foot-links" aria-label="Liens de pied de page">
         <a href="#/categories">Explorer</a>
         <a href="#/abonnement">Offres & tarifs</a>
-        <a href="#/profil">Mon foyer</a>
+        <a href="#/profil">Mon profil</a>
+        <a href="#/parametres">Paramètres</a>
+        <a href="/studio/">Kora Studio (Créateurs)</a>
         <a href="#/confidentialite">Confidentialité</a>
         <a href="#/cgu">Conditions d’utilisation</a>
       </nav>
@@ -66,7 +69,7 @@ const HOME_FILTERS = [
 ] as const
 
 export function Home() {
-  const { cat, items, byId, profile, isPremium } = useApp()
+  const { cat, items, byId, profile, isPremium, role } = useApp()
   const [filter, setFilter] = useState<string>('all')
   const [heroIdx, setHeroIdx] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -185,7 +188,21 @@ export function Home() {
       {filter !== 'all' ? (
         <section className="page">
           <h2>{HOME_FILTERS.find(f => f.id === filter)?.label} ({filteredItems.length})</h2>
-          {!filteredItems.length && <p className="mu">Aucun titre dans cette sélection pour ce profil.</p>}
+          {!filteredItems.length && (
+            <div className="empty-box">
+              <p className="mu">
+                {filter === 'serie'
+                  ? 'Aucune série n’est encore publiée. L’administrateur ou les créateurs peuvent ajouter leurs propres séries avec couverture et synopsis.'
+                  : 'Aucun titre dans cette sélection pour ce profil.'}
+              </p>
+              {filter === 'serie' && (
+                <div className="btns">
+                  <a className="btn p" href="/studio/"><Icon n="studio" s={18} />Publier sur Kora Studio</a>
+                  {role === 'admin' && <a className="btn" href="#/admin?t=titles&id=new&type=series"><Icon n="plus" s={18} />Ajouter une série (Admin)</a>}
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid flush">{filteredItems.map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
         </section>
       ) : (
@@ -695,14 +712,16 @@ export function Detail({ id }: { id: number }) {
 }
 
 /* ============================================================================
-   PROFIL — Compte, Foyer, PIN, Thèmes, Préférences, Notifications, Appareils
+   PROFIL (ÉPURÉ) — Profil actif, foyer, compte et historique récent
+   Les réglages avancés (thème, lecture, appareils, notifications) sont dans #/parametres
    ============================================================================ */
 export function Profile() {
   const {
     st, profile, items, byId, selectProfile, addProfile, updateProfile, deleteProfile,
-    set, setTheme, removeHistory, clearHistory, revokeDevice, markNotificationsRead, unreadCount
+    removeHistory, clearHistory, unreadCount
   } = useApp()
 
+  const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newKid, setNewKid] = useState(false)
   const [newAvatar, setNewAvatar] = useState(AVATARS[0].id)
@@ -715,7 +734,6 @@ export function Profile() {
   const [editPin, setEditPin] = useState('')
 
   const hist = Object.keys(profile.hist).map(Number).map(byId).filter(Boolean) as Item[]
-  const consent = (() => { try { return localStorage.getItem('kora-consent') === 'yes' } catch { return false } })()
   const activePlan = PLANS.find(p => p.id === st.plan) || PLANS[0]
 
   const switchProfile = (p: ProfileType) => {
@@ -735,23 +753,37 @@ export function Profile() {
   return (
     <div className="page profile-page">
       <div className="page-head">
-        <div>
-          <h1>Mon profil & foyer</h1>
-          <p className="mu">Formule active : <strong>Kora {activePlan.name}</strong> · {items.length} titres visibles pour {profile.name}</p>
+        <div className="profile-hero-id">
+          <ProfileAvatar profile={profile} size={58} />
+          <div>
+            <h1>{profile.name}</h1>
+            <p className="mu">Formule <strong>Kora {activePlan.name}</strong> · {items.length} titres accessibles</p>
+          </div>
         </div>
-        <a className="btn p" href="#/abonnement"><Icon n="crown" s={18} />Gérer mon abonnement</a>
+        <div className="btns flush">
+          <a className="btn" href="#/parametres">
+            <Icon n="gear" s={18} />
+            Paramètres {unreadCount > 0 && <span className="pill-accent">{unreadCount}</span>}
+          </a>
+          <a className="btn p" href="#/abonnement"><Icon n="crown" s={18} />Abonnement</a>
+        </div>
       </div>
 
-      <AccountBox />
+      <AccountSummary />
 
       {/* Profils du foyer */}
       <section className="panel">
-        <h2>Profils du foyer ({st.profiles.length}/{activePlan.profiles})</h2>
+        <div className="panel-head">
+          <h2>Profils du foyer ({st.profiles.length}/{activePlan.profiles})</h2>
+          <button type="button" className="btn" onClick={() => setCreateOpen(true)}>
+            <Icon n="plus" s={18} />Nouveau profil
+          </button>
+        </div>
         <div className="profile-grid">
           {st.profiles.map(p => (
             <div key={p.id} className={'profile-card' + (p.id === st.cur ? ' on' : '')}>
               <button type="button" className="profile-select" onClick={() => switchProfile(p)}>
-                <ProfileAvatar profile={p} size={52} />
+                <ProfileAvatar profile={p} size={48} />
                 <div>
                   <strong>{p.name}</strong>
                   <small className="mu">
@@ -764,149 +796,9 @@ export function Profile() {
             </div>
           ))}
         </div>
-
-        <div className="divider" />
-        <h3>Ajouter un profil</h3>
-        <div className="inline">
-          <label>Nom du profil
-            <input className="field" value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex. Fatoumata" />
-          </label>
-          <label>Couleur d’avatar
-            <select value={newAvatar} onChange={e => setNewAvatar(e.target.value)}>
-              {AVATARS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-            </select>
-          </label>
-          <label>Code PIN (optionnel)
-            <input className="field narrow" inputMode="numeric" maxLength={4} value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))} placeholder="4 chiffres" />
-          </label>
-          <label className="chk">
-            <input type="checkbox" checked={newKid} onChange={e => setNewKid(e.target.checked)} />
-            Profil enfant
-          </label>
-          <button
-            type="button"
-            className="btn p"
-            onClick={async () => {
-              if (!newName.trim()) return
-              await addProfile(newName.trim(), newKid, newAvatar, newPin || undefined)
-              setNewName(''); setNewPin(''); setNewKid(false)
-            }}
-          >
-            Créer le profil
-          </button>
-        </div>
       </section>
 
-      {/* Thème & Apparence (Charte Kora : Sombre #16140F / Cinéma Black #000000 / Clair #FBF9F4) */}
-      <section className="panel">
-        <h2>Apparence & thème Kora</h2>
-        <p className="mu">Choisissez l’ambiance conforme à la charte Kora (mode sombre recommandé pour le cinéma).</p>
-        <div className="theme-grid" role="radiogroup" aria-label="Thème de l’interface">
-          {([
-            ['dark', 'Sombre Kora', 'Obsidienne chaude #16140F & or #F2C334'],
-            ['black', 'Cinéma OLED', 'Noir absolu #000000 pour les écrans sombres'],
-            ['light', 'Clair éditorial', 'Crème papier #FBF9F4 & or profond #906D03']
-          ] as [ThemeMode, string, string][]).map(([id, label, desc]) => (
-            <button
-              key={id}
-              type="button"
-              role="radio"
-              aria-checked={st.theme === id}
-              className={'theme-card' + (st.theme === id ? ' on' : '')}
-              onClick={() => setTheme(id)}
-            >
-              <span className={'swatch swatch-' + id} aria-hidden="true" />
-              <div>
-                <strong>{label}</strong>
-                <small className="mu">{desc}</small>
-              </div>
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {/* Préférences de lecture & accessibilité */}
-      <section className="panel">
-        <h2>Préférences de lecture & accessibilité</h2>
-        <div className="inline">
-          <label>Sous-titres par défaut
-            <select value={st.subLang} onChange={e => set({ subLang: e.target.value })}>
-              {['Désactivés', 'Français', 'English', 'Bambara'].map(x => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label>Langue audio préférée
-            <select value={st.audioLang} onChange={e => set({ audioLang: e.target.value })}>
-              {['Original', 'Bambara', 'Français', 'Wolof', 'Peul', 'Anglais'].map(x => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label>Taille des sous-titres
-            <select value={st.subSize} onChange={e => set({ subSize: e.target.value as any })}>
-              <option value="petit">Petit</option>
-              <option value="normal">Normal</option>
-              <option value="grand">Grand (haute lisibilité)</option>
-            </select>
-          </label>
-          <label>Qualité vidéo par défaut
-            <select value={st.defaultQuality} onChange={e => set({ defaultQuality: e.target.value })}>
-              {['Auto', '4K', '1080p', '720p', '480p'].map(x => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label className="chk">
-            <input type="checkbox" checked={st.autoNext !== false} onChange={e => set({ autoNext: e.target.checked })} />
-            Enchaîner l’épisode suivant automatiquement
-          </label>
-        </div>
-        <p className="mu small-note">
-          Publicité personnalisée (formule gratuite) : <strong>{consent ? 'acceptée' : 'refusée'}</strong>.{' '}
-          <button type="button" className="lnk" onClick={() => { localStorage.removeItem('kora-consent'); location.reload() }}>Modifier mon choix</button>
-        </p>
-      </section>
-
-      {/* Notifications */}
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Notifications {unreadCount > 0 && <span className="pill-accent">{unreadCount} nouvelle{unreadCount > 1 ? 's' : ''}</span>}</h2>
-          {unreadCount > 0 && <button type="button" className="lnk" onClick={() => markNotificationsRead()}>Tout marquer comme lu</button>}
-        </div>
-        {!st.notifications.length ? <p className="mu">Aucune notification.</p> : (
-          <ul className="notif-list">
-            {st.notifications.map(n => (
-              <li key={n.id} className={n.read ? 'read' : 'unread'}>
-                <div>
-                  <strong>{n.title}</strong>
-                  <p className="mu">{n.body}</p>
-                  <small className="mu">{fmtDate(n.date)}</small>
-                </div>
-                <div className="notif-acts">
-                  {n.link && <a className="btn" href={n.link} onClick={() => markNotificationsRead(n.id)}>Voir</a>}
-                  {!n.read && <button type="button" className="lnk" onClick={() => markNotificationsRead(n.id)}>Lu</button>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      {/* Appareils connectés */}
-      <section className="panel">
-        <h2>Appareils connectés ({st.devices.length}/{activePlan.screens} écran{activePlan.screens > 1 ? 's' : ''} simultané{activePlan.screens > 1 ? 's' : ''})</h2>
-        <ul className="device-list">
-          {st.devices.map(d => (
-            <li key={d.id}>
-              <div className="device-info">
-                <Icon n="device" s={20} />
-                <div>
-                  <strong>{d.name} {d.current && <span className="pill-spec">Cet appareil</span>}</strong>
-                  <small className="mu">{d.platform} · Dernière activité : {fmtDate(d.lastSeen)}</small>
-                </div>
-              </div>
-              {!d.current && <button type="button" className="btn" onClick={() => revokeDevice(d.id)}>Déconnecter</button>}
-            </li>
-          ))}
-        </ul>
-      </section>
-
-      {/* Historique */}
+      {/* Historique de visionnage */}
       <section className="panel">
         <div className="panel-head">
           <h2>Historique de visionnage ({hist.length})</h2>
@@ -932,6 +824,38 @@ export function Profile() {
           setPinTarget(null)
         }}
       />
+
+      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Créer un profil du foyer">
+        <form
+          className="form"
+          onSubmit={async e => {
+            e.preventDefault()
+            if (!newName.trim()) return
+            await addProfile(newName.trim(), newKid, newAvatar, newPin || undefined)
+            setNewName(''); setNewPin(''); setNewKid(false); setCreateOpen(false)
+          }}
+        >
+          <label>Nom du profil
+            <input className="field" required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex. Fatoumata" />
+          </label>
+          <label>Couleur d’avatar
+            <select value={newAvatar} onChange={e => setNewAvatar(e.target.value)}>
+              {AVATARS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
+            </select>
+          </label>
+          <label>Code PIN (facultatif)
+            <input className="field narrow" inputMode="numeric" maxLength={4} value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))} placeholder="4 chiffres" />
+          </label>
+          <label className="chk">
+            <input type="checkbox" checked={newKid} onChange={e => setNewKid(e.target.checked)} />
+            Profil enfant (catalogue limité à Tous publics et 7+)
+          </label>
+          <div className="btns">
+            <button type="button" className="btn" onClick={() => setCreateOpen(false)}>Annuler</button>
+            <button type="submit" className="btn p">Créer le profil</button>
+          </div>
+        </form>
+      </Modal>
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={`Modifier « ${editing?.name || ''} »`}>
         {editing && (
@@ -986,7 +910,151 @@ export function Profile() {
 }
 
 /* ============================================================================
-   ABONNEMENT — 3 offres, Mensuel/Annuel, Orange Money / Moov / Wave / Carte
+   PARAMÈTRES — Thème, Préférences de lecture, Compte, Notifications, Appareils
+   ============================================================================ */
+export function Settings() {
+  const { st, set, setTheme, revokeDevice, markNotificationsRead, unreadCount } = useApp()
+  const activePlan = PLANS.find(p => p.id === st.plan) || PLANS[0]
+  const consent = (() => { try { return localStorage.getItem('kora-consent') === 'yes' } catch { return false } })()
+
+  return (
+    <div className="page settings-page">
+      <div className="page-head">
+        <div>
+          <h1>Paramètres</h1>
+          <p className="mu">Apparence, préférences de lecture, notifications, appareils et sécurité du compte.</p>
+        </div>
+        <a className="btn" href="#/profil"><Icon n="back" s={18} />Retour au profil</a>
+      </div>
+
+      {/* Apparence & Thème Kora */}
+      <section className="panel">
+        <h2>Apparence & thème Kora</h2>
+        <p className="mu">Choisissez l’ambiance conforme à la charte Kora (mode sombre recommandé pour le cinéma).</p>
+        <div className="theme-grid" role="radiogroup" aria-label="Thème de l’interface">
+          {([
+            ['dark', 'Sombre Kora', 'Obsidienne chaude #16140F & or #F2C334'],
+            ['black', 'Cinéma OLED', 'Noir absolu #000000 pour les écrans sombres'],
+            ['light', 'Clair éditorial', 'Crème papier #FBF9F4 & or profond #906D03']
+          ] as [ThemeMode, string, string][]).map(([id, label, desc]) => (
+            <button
+              key={id}
+              type="button"
+              role="radio"
+              aria-checked={st.theme === id}
+              className={'theme-card' + (st.theme === id ? ' on' : '')}
+              onClick={() => setTheme(id)}
+            >
+              <span className={'swatch swatch-' + id} aria-hidden="true" />
+              <div>
+                <strong>{label}</strong>
+                <small className="mu">{desc}</small>
+              </div>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Préférences de lecture & accessibilité */}
+      <section className="panel">
+        <h2>Lecture & accessibilité</h2>
+        <div className="inline">
+          <label>Sous-titres par défaut
+            <select value={st.subLang} onChange={e => set({ subLang: e.target.value })}>
+              {['Désactivés', 'Français', 'English', 'Bambara'].map(x => <option key={x}>{x}</option>)}
+            </select>
+          </label>
+          <label>Langue audio préférée
+            <select value={st.audioLang} onChange={e => set({ audioLang: e.target.value })}>
+              {['Original', 'Bambara', 'Français', 'Wolof', 'Peul', 'Anglais'].map(x => <option key={x}>{x}</option>)}
+            </select>
+          </label>
+          <label>Taille des sous-titres
+            <select value={st.subSize} onChange={e => set({ subSize: e.target.value as any })}>
+              <option value="petit">Petit</option>
+              <option value="normal">Normal</option>
+              <option value="grand">Grand (haute lisibilité)</option>
+            </select>
+          </label>
+          <label>Qualité vidéo par défaut
+            <select value={st.defaultQuality} onChange={e => set({ defaultQuality: e.target.value })}>
+              {['Auto', '4K', '1080p', '720p', '480p'].map(x => <option key={x}>{x}</option>)}
+            </select>
+          </label>
+          <label className="chk">
+            <input type="checkbox" checked={st.autoNext !== false} onChange={e => set({ autoNext: e.target.checked })} />
+            Enchaîner l’épisode suivant automatiquement
+          </label>
+        </div>
+      </section>
+
+      {/* Compte & sécurité */}
+      <AccountBox />
+
+      {/* Notifications */}
+      <section className="panel">
+        <div className="panel-head">
+          <h2>Notifications {unreadCount > 0 && <span className="pill-accent">{unreadCount} nouvelle{unreadCount > 1 ? 's' : ''}</span>}</h2>
+          {unreadCount > 0 && <button type="button" className="lnk" onClick={() => markNotificationsRead()}>Tout marquer comme lu</button>}
+        </div>
+        {!st.notifications.length ? <p className="mu">Aucune notification.</p> : (
+          <ul className="notif-list">
+            {st.notifications.map(n => (
+              <li key={n.id} className={n.read ? 'read' : 'unread'}>
+                <div>
+                  <strong>{n.title}</strong>
+                  <p className="mu">{n.body}</p>
+                  <small className="mu">{fmtDate(n.date)}</small>
+                </div>
+                <div className="notif-acts">
+                  {n.link && <a className="btn" href={n.link} onClick={() => markNotificationsRead(n.id)}>Voir</a>}
+                  {!n.read && <button type="button" className="lnk" onClick={() => markNotificationsRead(n.id)}>Lu</button>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Appareils connectés */}
+      <section className="panel">
+        <h2>Appareils connectés ({st.devices.length}/{activePlan.screens} écran{activePlan.screens > 1 ? 's' : ''} simultané{activePlan.screens > 1 ? 's' : ''})</h2>
+        <ul className="device-list">
+          {st.devices.map(d => (
+            <li key={d.id}>
+              <div className="device-info">
+                <Icon n="device" s={20} />
+                <div>
+                  <strong>{d.name} {d.current && <span className="pill-spec">Cet appareil</span>}</strong>
+                  <small className="mu">{d.platform} · Dernière activité : {fmtDate(d.lastSeen)}</small>
+                </div>
+              </div>
+              {!d.current && <button type="button" className="btn" onClick={() => revokeDevice(d.id)}>Déconnecter</button>}
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* Confidentialité & mentions */}
+      <section className="panel">
+        <h2>Confidentialité & données</h2>
+        <p className="mu">
+          Publicité personnalisée (formule gratuite) : <strong>{consent ? 'acceptée' : 'refusée'}</strong>.{' '}
+          <button type="button" className="lnk" onClick={() => { localStorage.removeItem('kora-consent'); location.reload() }}>Modifier mon choix</button>
+        </p>
+        <div className="btns">
+          <a className="btn" href="#/confidentialite">Politique de confidentialité</a>
+          <a className="btn" href="#/cgu">Conditions d’utilisation</a>
+        </div>
+      </section>
+
+      <Footer />
+    </div>
+  )
+}
+
+/* ============================================================================
+   ABONNEMENT — Mode simulation (activation directe) + Mode live (paiement obligatoire)
    ============================================================================ */
 const PROVIDERS = [
   { id: 'Orange Money', hint: 'Saisissez votre numéro Orange Money Mali / Sénégal / CI (+223…)', placeholder: '+223 76 00 00 00', kind: 'phone' },
@@ -1001,29 +1069,43 @@ export function Subscription() {
   const [checkoutPlan, setCheckoutPlan] = useState<PlanId | null>(null)
   const [provider, setProvider] = useState<string>(PROVIDERS[0].id)
   const [payInput, setPayInput] = useState('')
+  const [payErr, setPayErr] = useState('')
   const [busy, setBusy] = useState(false)
 
   const selected = PLANS.find(p => p.id === checkoutPlan)
   const activeProv = PROVIDERS.find(p => p.id === provider) || PROVIDERS[0]
   const currentPlan = PLANS.find(p => p.id === st.plan) || PLANS[0]
 
+  const activateFreeSimulation = async (planId: PlanId) => {
+    setBusy(true)
+    await subscribePlan(planId, billing, 'Activation gratuite')
+    setBusy(false)
+  }
+
   const confirmPayment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!checkoutPlan) return
-    setBusy(true)
-    await new Promise(r => setTimeout(r, 650))
-    await subscribePlan(checkoutPlan, billing, provider)
+    setBusy(true); setPayErr('')
+    const res = await subscribePlan(checkoutPlan, billing, provider, payInput)
     setBusy(false)
-    setCheckoutPlan(null)
-    setPayInput('')
+    if (res.ok) {
+      setCheckoutPlan(null)
+      setPayInput('')
+    } else {
+      setPayErr(res.error || 'Paiement refusé.')
+    }
   }
 
   return (
     <div className="page sub-page">
       <div className="sub-hero">
-        <span className="pill-accent">Offres Kora</span>
+        <span className="pill-accent">{IS_BILLING_SIMULATION ? 'Mode simulation · Activation gratuite' : 'Offres Kora'}</span>
         <h1>Choisissez votre formule</h1>
-        <p className="mu">Sans engagement. Changez ou résiliez à tout moment. Paiement mobile et carte bancaire.</p>
+        <p className="mu">
+          {IS_BILLING_SIMULATION
+            ? 'En phase de test, vous pouvez activer Premium ou Famille gratuitement en 1 clic. En production (VITE_BILLING_MODE=live), le paiement réel devient obligatoire.'
+            : 'Sans engagement. Paiement sécurisé par Orange Money, Moov Money, Wave ou carte bancaire.'}
+        </p>
 
         <div className="billing-toggle" role="group" aria-label="Fréquence de facturation">
           <button type="button" className={'chip' + (billing === 'month' ? ' on' : '')} onClick={() => setBilling('month')}>Mensuel</button>
@@ -1032,6 +1114,15 @@ export function Subscription() {
           </button>
         </div>
       </div>
+
+      {IS_BILLING_SIMULATION && (
+        <div className="sim-banner" role="note">
+          <Icon n="sparkles" s={18} />
+          <div>
+            <strong>Mode simulation actif</strong> — Activez n’importe quelle formule sans payer pour tester Kora sans publicité et en 4K. Pour obliger le paiement lors du lancement final, définissez <code>VITE_BILLING_MODE=live</code> sur Vercel.
+          </div>
+        </div>
+      )}
 
       <div className="plans">
         {PLANS.map(plan => {
@@ -1066,9 +1157,18 @@ export function Subscription() {
                 <button type="button" className="btn wide-btn" onClick={() => subscribePlan('free', 'month', 'Aucun')}>
                   Revenir à Gratuit
                 </button>
+              ) : IS_BILLING_SIMULATION ? (
+                <div className="plan-actions">
+                  <button type="button" className="btn p wide-btn" disabled={busy} onClick={() => activateFreeSimulation(plan.id)}>
+                    Activer {plan.name} gratuitement (simulation)
+                  </button>
+                  <button type="button" className="lnk small-lnk" onClick={() => { setPayErr(''); setCheckoutPlan(plan.id) }}>
+                    Aperçu du parcours de paiement
+                  </button>
+                </div>
               ) : (
-                <button type="button" className="btn p wide-btn" onClick={() => setCheckoutPlan(plan.id)}>
-                  Choisir {plan.name}
+                <button type="button" className="btn p wide-btn" onClick={() => { setPayErr(''); setCheckoutPlan(plan.id) }}>
+                  Payer et activer {plan.name}
                 </button>
               )}
             </section>
@@ -1113,7 +1213,7 @@ export function Subscription() {
         </section>
       )}
 
-      <Modal open={!!selected} onClose={() => setCheckoutPlan(null)} title={selected ? `Activer Kora ${selected.name}` : ''} maxWidth={520}>
+      <Modal open={!!selected} onClose={() => setCheckoutPlan(null)} title={selected ? `Paiement Kora ${selected.name}` : ''} maxWidth={520}>
         {selected && (
           <form className="form" onSubmit={confirmPayment}>
             <div className="checkout-summary">
@@ -1134,7 +1234,7 @@ export function Subscription() {
                   role="radio"
                   aria-checked={provider === p.id}
                   className={'chip' + (provider === p.id ? ' on' : '')}
-                  onClick={() => { setProvider(p.id); setPayInput('') }}
+                  onClick={() => { setProvider(p.id); setPayInput(''); setPayErr('') }}
                 >
                   {p.id}
                 </button>
@@ -1143,7 +1243,7 @@ export function Subscription() {
 
             <p className="mu small-note">{activeProv.hint}</p>
 
-            <label>{activeProv.kind === 'phone' ? 'Numéro de téléphone' : 'Numéro de carte (mode démonstration)'}
+            <label>{activeProv.kind === 'phone' ? 'Numéro de téléphone' : 'Numéro de carte'}
               <input
                 className="field"
                 required
@@ -1154,7 +1254,13 @@ export function Subscription() {
               />
             </label>
 
-            <p className="mu small-note">Environnement de démonstration sécurisé : aucun débit réel n’est effectué.</p>
+            {payErr && <p className="err-msg" role="alert">{payErr}</p>}
+
+            <p className="mu small-note">
+              {IS_BILLING_SIMULATION
+                ? 'Mode simulation : aucun débit réel n’est effectué.'
+                : 'Mode production : paiement vérifié côté serveur obligatoire avant activation.'}
+            </p>
 
             <div className="btns">
               <button type="button" className="btn" onClick={() => setCheckoutPlan(null)}>Annuler</button>

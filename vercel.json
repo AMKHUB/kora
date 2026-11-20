@@ -1,6 +1,10 @@
 {
   "framework": "vite",
   "outputDirectory": "dist",
+  "rewrites": [
+    { "source": "/studio", "destination": "/studio.html" },
+    { "source": "/studio/", "destination": "/studio.html" }
+  ],
   "headers": [
     {
       "source": "/(.*)",
