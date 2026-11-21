@@ -4,7 +4,9 @@ import { createAnonClient } from './supabaseServer.js'
 // Intégration officielle SasPay (https://api.saspay.me/api/v1) conforme à /llms.txt et /api-reference/openapi.json.
 // Toutes les requêtes sont exécutées exclusivement côté serveur. La clé API n'est jamais exposée ni journalisée.
 
-export const SASPAY_BASE_URL = 'https://api.saspay.me/api/v1'
+export const SASPAY_LIVE_BASE_URL = 'https://api.saspay.me/api/v1'
+export const SASPAY_SANDBOX_BASE_URL = 'https://sandbox-api.saspay.me/api/v1'
+export const SASPAY_BASE_URL = SASPAY_LIVE_BASE_URL
 export const SASPAY_BFF_GATE = 'kora_saspay_bff_gate_7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d'
 const WEBHOOK_TOLERANCE_SECONDS = 300
 
@@ -164,11 +166,15 @@ export function getSaspayConfig() {
   const appUrl = (process.env.APP_URL || process.env.SITE_URL || vaultCache?.app_url || '').trim().replace(/\/$/, '')
   const isTestKey = apiKey.startsWith('sk_test_')
   const isLiveKey = apiKey.startsWith('sk_live_')
+  const mode = isLiveKey ? 'live' : isTestKey ? 'test' : 'unconfigured'
+  const envBase = (process.env.SASPAY_BASE_URL || '').trim().replace(/\/$/, '')
+  const baseUrl = envBase || (mode === 'test' ? SASPAY_SANDBOX_BASE_URL : SASPAY_LIVE_BASE_URL)
   return {
     apiKey,
     webhookSecret,
     appUrl,
-    mode: isLiveKey ? 'live' : isTestKey ? 'test' : 'unconfigured',
+    baseUrl,
+    mode,
     configured: Boolean(apiKey && (isTestKey || isLiveKey)),
     webhookConfigured: Boolean(webhookSecret)
   }
@@ -367,7 +373,7 @@ export async function saspayRequest({
   }
 
   const cleanPath = path.startsWith('/') ? path : `/${path}`
-  const url = `${SASPAY_BASE_URL}${cleanPath}`
+  const url = `${cfg.baseUrl}${cleanPath}`
 
   const headers = {
     Accept: 'application/json'

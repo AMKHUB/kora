@@ -161,7 +161,7 @@ export default async function handler(req, res) {
         configured: cfg.configured,
         webhookConfigured: cfg.webhookConfigured,
         mode: cfg.mode,
-        baseUrl: 'https://api.saspay.me/api/v1',
+        baseUrl: cfg.baseUrl,
         catalog: SASPAY_CATALOG
       })
     }
