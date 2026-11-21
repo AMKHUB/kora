@@ -2,6 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { AVATARS, Episode, Item, PLANS, PlanId, Profile as ProfileType, ThemeMode, useApp } from './store'
 import { BrandLogo, Card, Icon, Meta, Modal, PinModal, Poster, ProfileAvatar, Row } from './ui'
 import { AccountBox, AccountSummary } from './auth'
+import {
+  confirmSaspayPaymentOtp,
+  createIntentIdempotencyKey,
+  processPaymentCheckout,
+  retrySaspayPayment,
+  SASPAY_COUNTRIES,
+  verifySaspayPayment
+} from './billing'
 
 const norm = (s: string) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
 const hay = (i: Item) => norm([i.title, i.director, i.country, i.type, i.synopsis, ...i.cast, ...i.langs, ...i.genres].join(' '))
@@ -1107,27 +1115,103 @@ export function Settings() {
 }
 
 /* ============================================================================
-   ABONNEMENT — Mode simulation (activation directe) + Mode live (paiement obligatoire)
+   ABONNEMENT — Mode simulation + Mode SasPay (Softpay, Checkout hébergé, OTP, Verify)
    ============================================================================ */
-const PROVIDERS = [
-  { id: 'Orange Money', hint: 'Saisissez votre numéro Orange Money Mali / Sénégal / CI (+223…)', placeholder: '+223 76 00 00 00', kind: 'phone' },
-  { id: 'Moov Money', hint: 'Validez depuis votre mobile Moov Money', placeholder: '+223 66 00 00 00', kind: 'phone' },
-  { id: 'Wave', hint: 'Confirmation instantanée dans votre application Wave', placeholder: '+221 77 000 00 00', kind: 'phone' },
-  { id: 'Carte bancaire', hint: 'Visa ou Mastercard (paiement sécurisé 3D-Secure)', placeholder: '4532 •••• •••• 1234', kind: 'card' }
-] as const
+const PENDING_SASPAY_KEY = 'kora-pending-saspay'
+
+type PendingSaspayState = {
+  planId: 'premium' | 'family'
+  billing: 'month' | 'year'
+  providerLabel: string
+  paymentId?: string
+  sessionId?: string
+  checkoutUrl?: string
+  idempotencyKey: string
+  postOtpConfirm?: boolean
+  status: 'PENDING' | 'FAILED' | 'SUCCESS'
+}
 
 export function Subscription() {
-  const { st, subscribePlan, cancelSubscription, billingSimulation } = useApp()
+  const { st, subscribePlan, applyVerifiedSubscription, cancelSubscription, billingSimulation, toast } = useApp()
   const [billing, setBilling] = useState<'month' | 'year'>(st.billing || 'month')
   const [checkoutPlan, setCheckoutPlan] = useState<PlanId | null>(null)
-  const [provider, setProvider] = useState<string>(PROVIDERS[0].id)
+  const [countryIso, setCountryIso] = useState('ML')
+  const [networkCode, setNetworkCode] = useState('orange_ml')
+  const [flowMode, setFlowMode] = useState<'softpay' | 'hosted'>('softpay')
   const [payInput, setPayInput] = useState('')
+  const [preOtp, setPreOtp] = useState('')
+  const [forcePreOtp, setForcePreOtp] = useState(false)
+  const [otpHint, setOtpHint] = useState('')
+  const [postOtp, setPostOtp] = useState('')
+  const [intentKey, setIntentKey] = useState(() => createIntentIdempotencyKey('sub'))
+  const [pendingTx, setPendingTx] = useState<PendingSaspayState | null>(() => {
+    try {
+      const raw = sessionStorage.getItem(PENDING_SASPAY_KEY)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  })
   const [payErr, setPayErr] = useState('')
+  const [payInfo, setPayInfo] = useState('')
   const [busy, setBusy] = useState(false)
 
   const selected = PLANS.find(p => p.id === checkoutPlan)
-  const activeProv = PROVIDERS.find(p => p.id === provider) || PROVIDERS[0]
   const currentPlan = PLANS.find(p => p.id === st.plan) || PLANS[0]
+  const activeCountry = SASPAY_COUNTRIES.find(c => c.iso === countryIso) || SASPAY_COUNTRIES[0]
+  const activeNet = activeCountry.networks.find(n => n.code === networkCode)
+  const isCard = networkCode === 'card'
+  const needsPreOtp = !isCard && flowMode === 'softpay' && (Boolean(activeNet?.otpPreRequired) || forcePreOtp)
+
+  const savePendingTx = (next: PendingSaspayState | null) => {
+    setPendingTx(next)
+    try {
+      if (next) sessionStorage.setItem(PENDING_SASPAY_KEY, JSON.stringify(next))
+      else sessionStorage.removeItem(PENDING_SASPAY_KEY)
+    } catch { /* ignoré */ }
+  }
+
+  // Au retour d'une redirection checkout_url (?saspay_return=1), on ne livre JAMAIS sur la seule redirection :
+  // on appelle systématiquement GET /payments/{payment_id}/verify/ côté serveur.
+  useEffect(() => {
+    if (!pendingTx || (!pendingTx.paymentId && !pendingTx.sessionId)) return
+    let active = true
+    ;(async () => {
+      setBusy(true)
+      const ver = await verifySaspayPayment({
+        paymentId: pendingTx.paymentId,
+        sessionId: pendingTx.sessionId
+      })
+      if (!active) return
+      setBusy(false)
+      if (ver.ok && ver.status === 'SUCCESS' && ver.delivered) {
+        applyVerifiedSubscription(
+          pendingTx.planId,
+          pendingTx.billing,
+          pendingTx.providerLabel,
+          ver.reference || pendingTx.paymentId || pendingTx.sessionId || 'SASPAY',
+          ver.charged || undefined
+        )
+        savePendingTx(null)
+        setCheckoutPlan(null)
+      } else if (ver.status === 'FAILED') {
+        savePendingTx({ ...pendingTx, status: 'FAILED', paymentId: ver.paymentId || pendingTx.paymentId })
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  const onCountryChange = (iso: string) => {
+    setCountryIso(iso)
+    const found = SASPAY_COUNTRIES.find(c => c.iso === iso)
+    if (found && found.networks.length && networkCode !== 'card') {
+      setNetworkCode(found.networks[0].code)
+    }
+    setForcePreOtp(false)
+    setPreOtp('')
+    setPayErr('')
+    setIntentKey(createIntentIdempotencyKey('sub'))
+  }
 
   const activateFreeSimulation = async (planId: PlanId) => {
     setBusy(true)
@@ -1135,29 +1219,186 @@ export function Subscription() {
     setBusy(false)
   }
 
+  const openCheckoutModal = (planId: PlanId) => {
+    setPayErr('')
+    setPayInfo('')
+    setPreOtp('')
+    setPostOtp('')
+    setForcePreOtp(false)
+    setIntentKey(createIntentIdempotencyKey(`sub-${planId}-${billing}`))
+    setCheckoutPlan(planId)
+  }
+
   const confirmPayment = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!checkoutPlan) return
-    setBusy(true); setPayErr('')
-    const res = await subscribePlan(checkoutPlan, billing, provider, payInput)
-    setBusy(false)
-    if (res.ok) {
-      setCheckoutPlan(null)
-      setPayInput('')
-    } else {
-      setPayErr(res.error || 'Paiement refusé.')
+    if (!checkoutPlan || checkoutPlan === 'free') return
+    setBusy(true); setPayErr(''); setPayInfo('')
+
+    if (billingSimulation) {
+      const simRes = await subscribePlan(checkoutPlan, billing, activeNet?.label || 'Simulation', payInput)
+      setBusy(false)
+      if (simRes.ok) {
+        setCheckoutPlan(null)
+        setPayInput('')
+      } else {
+        setPayErr(simRes.error || 'Activation impossible.')
+      }
+      return
     }
+
+    const providerLabel = flowMode === 'hosted'
+      ? 'SasPay Checkout'
+      : isCard
+        ? 'Carte bancaire (SasPay)'
+        : (activeNet?.label || 'Mobile Money (SasPay)')
+
+    const res = await processPaymentCheckout({
+      planId: checkoutPlan,
+      billing,
+      provider: activeNet?.provider || (isCard ? 'Carte bancaire' : 'Orange Money'),
+      customerRef: payInput.trim(),
+      countryIso,
+      networkCode,
+      otp: needsPreOtp ? preOtp.trim() : undefined,
+      flow: flowMode,
+      idempotencyKey: intentKey
+    }, false)
+
+    setBusy(false)
+
+    if (!res.ok) {
+      if (res.otpRequired) {
+        setForcePreOtp(true)
+        setOtpHint(res.otpInstructions || 'Composez le code USSD de votre opérateur pour obtenir votre code OTP avant de valider.')
+      }
+      // Si ce n'est pas une erreur réseau (502/503/429), on régénère une clé d'idempotence pour la correction des paramètres
+      if (res.code && res.code !== 'network_error' && res.code !== 'rate_limited') {
+        setIntentKey(createIntentIdempotencyKey(`sub-${checkoutPlan}-${billing}`))
+      }
+      setPayErr(res.error)
+      return
+    }
+
+    const nextPending: PendingSaspayState = {
+      planId: checkoutPlan,
+      billing,
+      providerLabel,
+      paymentId: res.paymentId,
+      sessionId: res.sessionId,
+      checkoutUrl: res.checkoutUrl,
+      idempotencyKey: res.idempotencyKey || intentKey,
+      postOtpConfirm: Boolean(activeNet?.postOtpConfirm),
+      status: 'PENDING'
+    }
+    savePendingTx(nextPending)
+
+    // Règle SasPay obligatoire : si checkout_url est non vide après un softpay (Wave, Orange Money, Djamo, Carte)
+    // ou une session checkout, il faut rediriger le client vers cette URL.
+    if (res.checkoutUrl && res.checkoutUrl.trim().length > 0) {
+      setPayInfo('Redirection vers la page de paiement sécurisée SasPay…')
+      window.location.assign(res.checkoutUrl)
+      return
+    }
+
+    setPayInfo('Demande poussée sur votre téléphone. Validez sur votre mobile puis cliquez sur « Vérifier le statut SasPay ».')
+  }
+
+  const handleVerifyNow = async () => {
+    if (!pendingTx) return
+    setBusy(true); setPayErr(''); setPayInfo('Vérification de votre paiement en temps réel auprès de SasPay…')
+    const ver = await verifySaspayPayment({
+      paymentId: pendingTx.paymentId,
+      sessionId: pendingTx.sessionId
+    })
+    setBusy(false)
+
+    if (!ver.ok) {
+      setPayInfo('')
+      setPayErr(ver.error || 'Vérification impossible.')
+      return
+    }
+
+    if (ver.status === 'SUCCESS' && ver.delivered) {
+      applyVerifiedSubscription(
+        pendingTx.planId,
+        pendingTx.billing,
+        pendingTx.providerLabel,
+        ver.reference || pendingTx.paymentId || pendingTx.sessionId || 'SASPAY',
+        ver.charged || undefined
+      )
+      savePendingTx(null)
+      setCheckoutPlan(null)
+      setPayInfo('')
+      return
+    }
+
+    if (ver.status === 'FAILED') {
+      savePendingTx({ ...pendingTx, status: 'FAILED', paymentId: ver.paymentId || pendingTx.paymentId })
+      setPayInfo('')
+      setPayErr('Le paiement a échoué (FAILED). Vous pouvez relancer cette transaction ci-dessous sans double débit.')
+      return
+    }
+
+    setPayInfo('Statut actuel : PENDING (en attente de confirmation sur votre mobile). Aucun accès n’est livré avant le statut SUCCESS.')
+  }
+
+  const handleConfirmPostOtp = async () => {
+    if (!pendingTx?.paymentId || !postOtp.trim()) return
+    setBusy(true); setPayErr(''); setPayInfo('Confirmation du code OTP auprès de SasPay…')
+    const res = await confirmSaspayPaymentOtp(pendingTx.paymentId, postOtp.trim())
+    setBusy(false)
+    if (!res.ok) {
+      setPayInfo('')
+      setPayErr(res.error || 'Code OTP refusé.')
+      return
+    }
+    if (res.status === 'SUCCESS' && res.delivered) {
+      applyVerifiedSubscription(
+        pendingTx.planId,
+        pendingTx.billing,
+        pendingTx.providerLabel,
+        pendingTx.paymentId,
+        undefined
+      )
+      savePendingTx(null)
+      setCheckoutPlan(null)
+      setPostOtp('')
+      return
+    }
+    setPayInfo(`Code OTP transmis. Statut : ${res.status}. Cliquez sur « Vérifier le statut SasPay » pour finaliser.`)
+  }
+
+  const handleRetryFailed = async () => {
+    if (!pendingTx?.paymentId) return
+    setBusy(true); setPayErr(''); setPayInfo('Relance de la transaction existante auprès de SasPay…')
+    const retryKey = createIntentIdempotencyKey(`retry-${pendingTx.paymentId.slice(0, 8)}`)
+    const res = await retrySaspayPayment({
+      paymentId: pendingTx.paymentId,
+      idempotencyKey: retryKey
+    })
+    setBusy(false)
+    if (!res.ok) {
+      setPayInfo('')
+      setPayErr(res.error || 'Impossible de relancer cette transaction.')
+      return
+    }
+    savePendingTx({ ...pendingTx, status: 'PENDING', checkoutUrl: res.checkoutUrl || pendingTx.checkoutUrl })
+    if (res.checkoutUrl) {
+      window.location.assign(res.checkoutUrl)
+      return
+    }
+    setPayInfo('Transaction relancée ! Validez sur votre téléphone puis vérifiez le statut.')
   }
 
   return (
     <div className="page sub-page">
       <div className="sub-hero">
-        <span className="pill-accent">{billingSimulation ? 'Offre découverte · Activation gratuite' : 'Offres & Abonnements Kora'}</span>
+        <span className="pill-accent">{billingSimulation ? 'Offre découverte · Activation gratuite' : 'Offres & Abonnements Kora · SasPay'}</span>
         <h1>Choisissez votre formule</h1>
         <p className="mu">
           {billingSimulation
             ? 'Pendant notre phase de lancement, activez gratuitement votre formule Kora Premium ou Famille en un clic et profitez du catalogue sans publicité jusqu’en 4K.'
-            : 'Sans engagement. Paiement simple et sécurisé par Orange Money, Moov Money, Wave ou carte bancaire.'}
+            : 'Sans engagement. Paiement sécurisé via SasPay (Orange Money, Wave, Moov Money, MTN MoMo ou carte bancaire).'}
         </p>
 
         <div className="billing-toggle" role="group" aria-label="Fréquence de facturation">
@@ -1175,6 +1416,44 @@ export function Subscription() {
             <strong>Accès découverte offert</strong> — Choisissez la formule de votre choix ci-dessous pour l’activer immédiatement sans aucun frais et profiter du cinéma africain en haute définition.
           </div>
         </div>
+      )}
+
+      {pendingTx && (
+        <section className="panel" aria-live="polite">
+          <div className="panel-head">
+            <div>
+              <h2>Transaction SasPay en cours de vérification ({pendingTx.status})</h2>
+              <p className="mu">
+                Référence : <strong>{pendingTx.paymentId || pendingTx.sessionId}</strong> · {pendingTx.providerLabel}.
+                L’abonnement est activé uniquement lorsque SasPay confirme le statut <strong>SUCCESS</strong>.
+              </p>
+            </div>
+            <span className={pendingTx.status === 'FAILED' ? 'pill-accent' : 'pill-spec'}>
+              {pendingTx.status}
+            </span>
+          </div>
+          {payInfo && <p className="status-box" role="status">{payInfo}</p>}
+          {payErr && <p className="err-msg" role="alert">{payErr}</p>}
+          <div className="btns flush">
+            <button type="button" className="btn p" disabled={busy} onClick={handleVerifyNow}>
+              <Icon n="check" s={18} />
+              {busy ? 'Vérification…' : 'Vérifier le statut SasPay maintenant'}
+            </button>
+            {pendingTx.checkoutUrl && (
+              <a className="btn" href={pendingTx.checkoutUrl}>
+                Ouvrir la page de paiement SasPay
+              </a>
+            )}
+            {pendingTx.status === 'FAILED' && pendingTx.paymentId && (
+              <button type="button" className="btn" disabled={busy} onClick={handleRetryFailed}>
+                Relancer ce paiement (sans double débit)
+              </button>
+            )}
+            <button type="button" className="btn" disabled={busy} onClick={() => { savePendingTx(null); setPayInfo(''); setPayErr('') }}>
+              Fermer ce suivi
+            </button>
+          </div>
+        </section>
       )}
 
       <div className="plans">
@@ -1215,12 +1494,12 @@ export function Subscription() {
                   <button type="button" className="btn p wide-btn" disabled={busy} onClick={() => activateFreeSimulation(plan.id)}>
                     Activer {plan.name} gratuitement
                   </button>
-                  <button type="button" className="lnk small-lnk" onClick={() => { setPayErr(''); setCheckoutPlan(plan.id) }}>
-                    Voir les moyens de paiement
+                  <button type="button" className="lnk small-lnk" onClick={() => openCheckoutModal(plan.id)}>
+                    Voir le paiement SasPay (Mobile Money & Carte)
                   </button>
                 </div>
               ) : (
-                <button type="button" className="btn p wide-btn" onClick={() => { setPayErr(''); setCheckoutPlan(plan.id) }}>
+                <button type="button" className="btn p wide-btn" onClick={() => openCheckoutModal(plan.id)}>
                   Payer et activer {plan.name}
                 </button>
               )}
@@ -1247,7 +1526,7 @@ export function Subscription() {
           <div className="tw">
             <table>
               <thead>
-                <tr><th>Référence</th><th>Date</th><th>Offre</th><th>Moyen</th><th>Montant</th><th>Statut</th></tr>
+                <tr><th>Référence</th><th>Date</th><th>Offre</th><th>Moyen</th><th>Montant débité</th><th>Statut</th></tr>
               </thead>
               <tbody>
                 {st.invoices.map(inv => (
@@ -1257,7 +1536,7 @@ export function Subscription() {
                     <td>Kora {inv.planName} ({inv.billing === 'year' ? 'an' : 'mois'})</td>
                     <td>{inv.provider}</td>
                     <td>{inv.amountXof.toLocaleString('fr-FR')} FCFA</td>
-                    <td><span className="pill-ok">Payée</span></td>
+                    <td><span className={inv.status === 'paid' ? 'pill-ok' : 'pill-spec'}>{inv.status === 'paid' ? 'Payée (SUCCESS)' : 'En attente'}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -1266,63 +1545,171 @@ export function Subscription() {
         </section>
       )}
 
-      <Modal open={!!selected} onClose={() => setCheckoutPlan(null)} title={selected ? `Paiement Kora ${selected.name}` : ''} maxWidth={520}>
+      <Modal open={!!selected} onClose={() => setCheckoutPlan(null)} title={selected ? `Paiement SasPay · Kora ${selected.name}` : ''} maxWidth={560}>
         {selected && (
-          <form className="form" onSubmit={confirmPayment}>
-            <div className="checkout-summary">
-              <div>
-                <strong>Kora {selected.name}</strong>
-                <small className="mu">{billing === 'year' ? 'Facturation annuelle (2 mois offerts)' : 'Facturation mensuelle · sans engagement'}</small>
+          pendingTx && pendingTx.planId === selected.id ? (
+            <div className="form">
+              <div className="checkout-summary">
+                <div>
+                  <strong>Vérification du paiement SasPay</strong>
+                  <small className="mu">ID : {pendingTx.paymentId || pendingTx.sessionId}</small>
+                </div>
+                <span className={pendingTx.status === 'FAILED' ? 'pill-accent' : 'pill-spec'}>
+                  {pendingTx.status}
+                </span>
               </div>
-              <strong className="checkout-price">
-                {(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')} FCFA
-              </strong>
-            </div>
 
-            <div className="chips" role="radiogroup" aria-label="Moyen de paiement">
-              {PROVIDERS.map(p => (
+              {payInfo && <p className="status-box" role="status">{payInfo}</p>}
+              {payErr && <p className="err-msg" role="alert">{payErr}</p>}
+
+              {pendingTx.postOtpConfirm && pendingTx.paymentId && (
+                <label>Code OTP reçu par SMS (confirmation post-push)
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input
+                      className="field"
+                      inputMode="numeric"
+                      placeholder="Ex. 482913"
+                      value={postOtp}
+                      onChange={e => setPostOtp(e.target.value)}
+                    />
+                    <button type="button" className="btn p" disabled={busy || !postOtp.trim()} onClick={handleConfirmPostOtp}>
+                      Confirmer OTP
+                    </button>
+                  </div>
+                </label>
+              )}
+
+              <div className="btns">
+                <button type="button" className="btn p" disabled={busy} onClick={handleVerifyNow}>
+                  <Icon n="check" s={18} />
+                  {busy ? 'Vérification…' : 'Vérifier mon paiement maintenant'}
+                </button>
+                {pendingTx.checkoutUrl && (
+                  <a className="btn" href={pendingTx.checkoutUrl}>
+                    Ouvrir la page SasPay
+                  </a>
+                )}
+                {pendingTx.status === 'FAILED' && pendingTx.paymentId && (
+                  <button type="button" className="btn" disabled={busy} onClick={handleRetryFailed}>
+                    Relancer le paiement
+                  </button>
+                )}
+                <button type="button" className="btn" disabled={busy} onClick={() => { savePendingTx(null); setPayInfo(''); setPayErr('') }}>
+                  Nouveau moyen de paiement
+                </button>
+              </div>
+            </div>
+          ) : (
+            <form className="form" onSubmit={confirmPayment}>
+              <div className="checkout-summary">
+                <div>
+                  <strong>Kora {selected.name}</strong>
+                  <small className="mu">{billing === 'year' ? 'Facturation annuelle (2 mois offerts)' : 'Facturation mensuelle · sans engagement'}</small>
+                </div>
+                <strong className="checkout-price">
+                  {(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')}.00 FCFA
+                </strong>
+              </div>
+
+              <div className="chips" role="radiogroup" aria-label="Mode de paiement SasPay">
                 <button
-                  key={p.id}
                   type="button"
                   role="radio"
-                  aria-checked={provider === p.id}
-                  className={'chip' + (provider === p.id ? ' on' : '')}
-                  onClick={() => { setProvider(p.id); setPayInput(''); setPayErr('') }}
+                  aria-checked={flowMode === 'softpay'}
+                  className={'chip' + (flowMode === 'softpay' ? ' on' : '')}
+                  onClick={() => { setFlowMode('softpay'); setPayErr('') }}
                 >
-                  {p.id}
+                  Paiement direct (Softpay)
                 </button>
-              ))}
-            </div>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={flowMode === 'hosted'}
+                  className={'chip' + (flowMode === 'hosted' ? ' on' : '')}
+                  onClick={() => { setFlowMode('hosted'); setPayErr('') }}
+                >
+                  Page hébergée SasPay
+                </button>
+              </div>
 
-            <p className="mu small-note">{activeProv.hint}</p>
+              <div className="inline">
+                <label>Pays
+                  <select value={countryIso} onChange={e => onCountryChange(e.target.value)}>
+                    {SASPAY_COUNTRIES.map(c => (
+                      <option key={c.iso} value={c.iso}>{c.name} ({c.dialCode})</option>
+                    ))}
+                  </select>
+                </label>
 
-            <label>{activeProv.kind === 'phone' ? 'Numéro de téléphone' : 'Numéro de carte'}
-              <input
-                className="field"
-                required
-                inputMode={activeProv.kind === 'phone' ? 'tel' : 'numeric'}
-                placeholder={activeProv.placeholder}
-                value={payInput}
-                onChange={e => setPayInput(e.target.value)}
-              />
-            </label>
+                {flowMode === 'softpay' && (
+                  <label>Réseau Mobile Money ou Carte
+                    <select
+                      value={networkCode}
+                      onChange={e => {
+                        setNetworkCode(e.target.value)
+                        setForcePreOtp(false)
+                        setPreOtp('')
+                        setPayErr('')
+                        setIntentKey(createIntentIdempotencyKey(`sub-${selected.id}-${billing}`))
+                      }}
+                    >
+                      {activeCountry.networks.map(n => (
+                        <option key={n.code} value={n.code}>{n.label}</option>
+                      ))}
+                      <option value="card">Carte bancaire Visa / Mastercard</option>
+                    </select>
+                  </label>
+                )}
+              </div>
 
-            {payErr && <p className="err-msg" role="alert">{payErr}</p>}
+              {flowMode === 'softpay' && !isCard && (
+                <label>Numéro Mobile Money ({activeCountry.name})
+                  <input
+                    className="field"
+                    required
+                    inputMode="tel"
+                    placeholder={`${activeCountry.dialCode} 76 00 00 00`}
+                    value={payInput}
+                    onChange={e => setPayInput(e.target.value)}
+                  />
+                </label>
+              )}
 
-            <p className="mu small-note">
-              {billingSimulation
-                ? 'Offre découverte : aucun débit ne sera effectué.'
-                : 'Transaction sécurisée. Votre abonnement est activé dès confirmation du paiement.'}
-            </p>
+              {needsPreOtp && (
+                <label>
+                  Code OTP pré-paiement ({activeNet?.label || networkCode})
+                  <small className="mu">{otpHint || activeNet?.otpInstructions}</small>
+                  <input
+                    className="field"
+                    required
+                    inputMode="numeric"
+                    placeholder="Code OTP obtenu par USSD"
+                    value={preOtp}
+                    onChange={e => setPreOtp(e.target.value)}
+                  />
+                </label>
+              )}
 
-            <div className="btns">
-              <button type="button" className="btn" onClick={() => setCheckoutPlan(null)}>Annuler</button>
-              <button type="submit" className="btn p" disabled={busy}>
-                <Icon n="card" s={18} />
-                {busy ? 'Validation en cours…' : `Confirmer (${(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')} FCFA)`}
-              </button>
-            </div>
-          </form>
+              {payInfo && <p className="status-box" role="status">{payInfo}</p>}
+              {payErr && <p className="err-msg" role="alert">{payErr}</p>}
+
+              <p className="mu small-note">
+                {billingSimulation
+                  ? 'Mode découverte actif : aucun débit ne sera effectué.'
+                  : 'Paiement sécurisé via SasPay. Si votre opérateur (Wave, Orange Money, Carte) renvoie une page de confirmation, vous y serez redirigé automatiquement. Votre abonnement est activé dès vérification du statut SUCCESS.'}
+              </p>
+
+              <div className="btns">
+                <button type="button" className="btn" onClick={() => setCheckoutPlan(null)}>Annuler</button>
+                <button type="submit" className="btn p" disabled={busy}>
+                  <Icon n="card" s={18} />
+                  {busy
+                    ? 'Initialisation SasPay…'
+                    : `Payer ${(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')}.00 FCFA`}
+                </button>
+              </div>
+            </form>
+          )
         )}
       </Modal>
 

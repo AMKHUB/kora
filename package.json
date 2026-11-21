@@ -7,7 +7,8 @@
     "dev": "concurrently -k \"node server.js\" \"vite\"",
     "build": "node scripts/make-icons.mjs && tsc --noEmit && vite build",
     "start": "NODE_ENV=production node server.js",
-    "postbuild": "node -e \"require('fs').copyFileSync('dist/index.html','dist/404.html')\""
+    "postbuild": "node -e \"require('fs').copyFileSync('dist/index.html','dist/404.html')\"",
+    "verify:saspay": "node scripts/verify-saspay.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.119.0",

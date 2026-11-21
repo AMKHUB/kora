@@ -335,29 +335,45 @@ export function verifyPinServer(pin, stored) {
    ============================================================================ */
 const MAX_JSON_BYTES = 512 * 1024
 
-export async function readJsonBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body
+export async function readRawBody(req) {
+  if (Buffer.isBuffer(req.rawBody)) return req.rawBody.toString('utf8')
+  if (typeof req.rawBody === 'string') return req.rawBody
+  if (Buffer.isBuffer(req.body)) {
+    req.rawBody = req.body
+    return req.body.toString('utf8')
+  }
   if (typeof req.body === 'string') {
     if (req.body.length > MAX_JSON_BYTES) throw Object.assign(new Error('Corps trop volumineux.'), { status: 413 })
-    try { return JSON.parse(req.body) } catch { return {} }
+    req.rawBody = Buffer.from(req.body, 'utf8')
+    return req.body
   }
   return await new Promise((resolve, reject) => {
-    let raw = ''
+    const chunks = []
     let bytes = 0
     req.on?.('data', chunk => {
-      bytes += chunk.length
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8')
+      bytes += buf.length
       if (bytes > MAX_JSON_BYTES) {
         req.destroy?.()
         reject(Object.assign(new Error('Requête trop volumineuse.'), { status: 413 }))
         return
       }
-      raw += chunk
+      chunks.push(buf)
     })
     req.on?.('end', () => {
-      try { resolve(raw ? JSON.parse(raw) : {}) } catch { resolve({}) }
+      const full = Buffer.concat(chunks)
+      req.rawBody = full
+      resolve(full.toString('utf8'))
     })
-    req.on?.('error', () => resolve({}))
+    req.on?.('error', () => resolve(''))
   })
+}
+
+export async function readJsonBody(req) {
+  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) return req.body
+  const raw = await readRawBody(req)
+  if (!raw) return {}
+  try { return JSON.parse(raw) } catch { return {} }
 }
 
 export function getQuery(req) {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiGet, apiPost, authErrorMessage, AuthUser, consumeAuthRedirectTokens, uploadFileToSignedUrl } from '../api'
 import { GoogleAuthButton } from '../auth'
+import { createIntentIdempotencyKey, SASPAY_COUNTRIES } from '../billing'
 import { Icon, KoraSymbol, MaintenancePage } from '../ui'
 
 type StudioTab = 'browse' | 'dashboard' | 'content' | 'upload' | 'channel' | 'analytics'
@@ -565,17 +566,20 @@ export default function StudioApp() {
               )}
 
               {tab === 'analytics' && (
-                <section className="panel">
-                  <h1>Statistiques & Monétisation Créateurs</h1>
-                  <p className="mu">Suivez l’audience de vos séries et vos revenus estimés sur Kora (partage publicitaire formule gratuite + temps de visionnage Premium).</p>
-                  <dl className="stats">
-                    <div><dt>Œuvres publiées</dt><dd>{publishedCount}</dd></div>
-                    <div><dt>Épisodes disponibles</dt><dd>{totalEpisodes}</dd></div>
-                    <div><dt>Partage revenus Kora</dt><dd>70 %</dd></div>
-                    <div><dt>Paiement créateurs</dt><dd>FCFA</dd></div>
-                  </dl>
-                  <p className="mu">Versements disponibles par <strong>Orange Money</strong>, <strong>Moov Money</strong>, <strong>Wave</strong> ou virement bancaire dès l’activation du mode facturation en production.</p>
-                </section>
+                <>
+                  <section className="panel">
+                    <h1>Statistiques & Monétisation Créateurs</h1>
+                    <p className="mu">Suivez l’audience de vos séries et vos revenus estimés sur Kora (partage publicitaire formule gratuite + temps de visionnage Premium).</p>
+                    <dl className="stats">
+                      <div><dt>Œuvres publiées</dt><dd>{publishedCount}</dd></div>
+                      <div><dt>Épisodes disponibles</dt><dd>{totalEpisodes}</dd></div>
+                      <div><dt>Partage revenus Kora</dt><dd>70 %</dd></div>
+                      <div><dt>Paiement créateurs</dt><dd>SasPay</dd></div>
+                    </dl>
+                  </section>
+
+                  <CreatorPayoutSection notify={notify} />
+                </>
               )}
             </>
           )}
@@ -1286,6 +1290,171 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
           </div>
         </aside>
       </div>
+    </section>
+  )
+}
+
+function CreatorPayoutSection({ notify }: { notify: (msg: string, kind?: 'ok' | 'err' | 'info') => void }) {
+  const [countryIso, setCountryIso] = useState('ML')
+  const [method, setMethod] = useState('orange_ml')
+  const [msisdn, setMsisdn] = useState('')
+  const [amount, setAmount] = useState('10000.00')
+  const [desc, setDesc] = useState('Reversement revenus créateur Kora Studio')
+  const [idempKey, setIdempKey] = useState(() => createIntentIdempotencyKey('payout'))
+  const [payouts, setPayouts] = useState<any[]>([])
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState('')
+
+  const activeCountry = SASPAY_COUNTRIES.find(c => c.iso === countryIso) || SASPAY_COUNTRIES[0]
+
+  const loadPayouts = async () => {
+    const r = await apiGet<{ payouts: any[] }>('/api/checkout?action=payouts')
+    if (r.ok) setPayouts(r.data.payouts || [])
+  }
+
+  useEffect(() => { loadPayouts() }, [])
+
+  const onCountryChange = (iso: string) => {
+    setCountryIso(iso)
+    const c = SASPAY_COUNTRIES.find(x => x.iso === iso)
+    if (c && c.networks.length) setMethod(c.networks[0].code)
+    setIdempKey(createIntentIdempotencyKey('payout'))
+  }
+
+  const submitPayout = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!msisdn.trim()) return
+    setBusy(true); setMsg('')
+    const r = await apiPost('/api/checkout?action=payout-init', {
+      country: countryIso,
+      currency: activeCountry.currency,
+      method,
+      msisdn: msisdn.trim(),
+      amount: amount.trim(),
+      description: desc.trim(),
+      idempotencyKey: idempKey
+    })
+    setBusy(false)
+    if (!r.ok) {
+      if (r.data.code && r.data.code !== 'network_error' && r.data.code !== 'rate_limited') {
+        setIdempKey(createIntentIdempotencyKey('payout'))
+      }
+      setMsg(r.data.error || 'Retrait impossible.')
+      return
+    }
+    setIdempKey(createIntentIdempotencyKey('payout'))
+    setMsisdn('')
+    setMsg(`Retrait SasPay initialisé (${r.data.payoutId}). Cliquez sur « Vérifier » pour suivre son exécution.`)
+    notify('Retrait SasPay initialisé !', 'ok')
+    loadPayouts()
+  }
+
+  const verifyOne = async (payoutId: string) => {
+    setBusy(true)
+    const r = await apiPost('/api/checkout?action=payout-verify', { payoutId })
+    setBusy(false)
+    if (!r.ok) {
+      notify(r.data.error || 'Vérification impossible.', 'err')
+      return
+    }
+    notify(`Statut du retrait : ${r.data.status}`, r.data.status === 'SUCCESS' ? 'ok' : 'info')
+    loadPayouts()
+  }
+
+  return (
+    <section className="panel form" style={{ maxWidth: 'none', marginTop: 18 }}>
+      <div>
+        <h2>Retrait de revenus Mobile Money via SasPay</h2>
+        <p className="mu">
+          Demandez un reversement direct vers votre numéro Mobile Money dans la devise de votre pays.
+        </p>
+      </div>
+
+      <form className="form" style={{ maxWidth: 'none' }} onSubmit={submitPayout}>
+        <div className="inline">
+          <label>Pays du bénéficiaire
+            <select value={countryIso} onChange={e => onCountryChange(e.target.value)}>
+              {SASPAY_COUNTRIES.map(c => (
+                <option key={c.iso} value={c.iso}>{c.name} ({c.currency})</option>
+              ))}
+            </select>
+          </label>
+          <label>Opérateur Mobile Money
+            <select value={method} onChange={e => { setMethod(e.target.value); setIdempKey(createIntentIdempotencyKey('payout')) }}>
+              {activeCountry.networks.map(n => (
+                <option key={n.code} value={n.code}>{n.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>Montant ({activeCountry.currency})
+            <input
+              className="field narrow"
+              required
+              value={amount}
+              onChange={e => { setAmount(e.target.value); setIdempKey(createIntentIdempotencyKey('payout')) }}
+              placeholder="10000.00"
+            />
+          </label>
+        </div>
+
+        <div className="inline">
+          <label>Numéro Mobile Money du bénéficiaire
+            <input
+              className="field"
+              required
+              inputMode="tel"
+              placeholder={`${activeCountry.dialCode} 76 00 00 00`}
+              value={msisdn}
+              onChange={e => { setMsisdn(e.target.value); setIdempKey(createIntentIdempotencyKey('payout')) }}
+            />
+          </label>
+          <label>Motif
+            <input className="field" value={desc} onChange={e => setDesc(e.target.value)} />
+          </label>
+        </div>
+
+        {msg && <p className="status-box" role="status">{msg}</p>}
+
+        <div className="btns">
+          <button type="submit" className="btn p" disabled={busy}>
+            <Icon n="sparkles" s={18} />
+            {busy ? 'Initialisation du retrait…' : `Demander le retrait (${amount} ${activeCountry.currency})`}
+          </button>
+        </div>
+      </form>
+
+      {payouts.length > 0 && (
+        <div className="tw" style={{ marginTop: 12 }}>
+          <table>
+            <thead>
+              <tr><th>ID SasPay</th><th>Pays / Réseau</th><th>Numéro</th><th>Montant</th><th>Net reçu</th><th>Statut</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+              {payouts.map(p => (
+                <tr key={p.id}>
+                  <td>{p.saspay_payout_id || p.idempotency_key}</td>
+                  <td>{p.country} · {p.method}</td>
+                  <td>{p.recipient_msisdn}</td>
+                  <td>{p.amount} {p.currency}</td>
+                  <td>{p.net_amount ? `${p.net_amount} ${p.currency}` : '—'}</td>
+                  <td>
+                    <span className={p.status === 'SUCCESS' ? 'pill-ok' : p.status === 'FAILED' ? 'pill-accent' : 'pill-spec'}>
+                      {p.status}
+                    </span>
+                  </td>
+                  <td>
+                    {p.saspay_payout_id && (
+                      <button type="button" className="lnk" disabled={busy} onClick={() => verifyOne(p.saspay_payout_id)}>
+                        Vérifier
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </section>
   )
 }

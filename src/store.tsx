@@ -311,6 +311,7 @@ type Ctx = {
   selectProfile: (id: string) => void
   verifyProfilePin: (profileId: string, pin: string) => Promise<boolean>
   subscribePlan: (planId: PlanId, billing: 'month' | 'year', provider: string, customerRef?: string) => Promise<{ ok: boolean; error?: string }>
+  applyVerifiedSubscription: (planId: PlanId, billing: 'month' | 'year', provider: string, reference: string, chargedAmount?: string | number) => void
   cancelSubscription: (cancel: boolean) => void
   updateAccount: (name: string, country: string) => Promise<void>
   revokeDevice: (deviceId: string) => Promise<void>
@@ -662,11 +663,44 @@ export function Provider({ children }: { children: ReactNode }) {
       }
       return Boolean(res.data.valid)
     },
+    applyVerifiedSubscription: (planId, billing, provider, reference, chargedAmount) => {
+      const plan = PLANS.find(p => p.id === planId) || PLANS[1]
+      const fallbackAmount = billing === 'year' ? plan.priceYear : plan.priceMonth
+      const numericCharged = chargedAmount !== undefined && chargedAmount !== null
+        ? Math.round(Number(chargedAmount) || fallbackAmount)
+        : fallbackAmount
+      const days = billing === 'year' ? 365 : 30
+      const periodEnd = new Date(Date.now() + 86400000 * days).toISOString()
+      const inv: Invoice = {
+        id: reference,
+        date: new Date().toISOString(),
+        planId,
+        planName: plan.name,
+        billing,
+        amountXof: numericCharged,
+        provider,
+        reference,
+        status: 'paid'
+      }
+      setSt(s => ({
+        ...s,
+        plan: planId,
+        billing,
+        cancelAtPeriodEnd: false,
+        periodEnd,
+        invoices: s.invoices.some(i => i.reference === reference) ? s.invoices : [inv, ...s.invoices]
+      }))
+      toast(`Paiement vérifié (SUCCESS) — Kora ${plan.name} est activé !`, 'ok')
+    },
     subscribePlan: async (planId, billing, provider, customerRef = '') => {
       if (!requireAuth('gérer votre abonnement')) return { ok: false, error: 'Connexion requise.' }
       const plan = PLANS.find(p => p.id === planId)!
       const amount = billing === 'year' ? plan.priceYear : plan.priceMonth
-      let ref = `SIM-${Date.now().toString(36).toUpperCase()}`
+      const ref = `SIM-${Date.now().toString(36).toUpperCase()}`
+
+      if (planId !== 'free' && !billingSimulation) {
+        return { ok: false, error: 'Veuillez finaliser et vérifier le paiement SasPay (statut SUCCESS requis).' }
+      }
 
       if (planId !== 'free' && billingSimulation) {
         const chk = await apiPost('/api/me?action=check-simulation')
@@ -677,20 +711,6 @@ export function Provider({ children }: { children: ReactNode }) {
         }
       }
 
-      if (planId !== 'free' && !billingSimulation) {
-        const res = await processPaymentCheckout({
-          planId,
-          billing,
-          provider: provider as 'Orange Money' | 'Moov Money' | 'Wave' | 'Carte bancaire',
-          customerRef
-        }, billingSimulation)
-        if (!res.ok) {
-          toast(res.error, 'err')
-          return { ok: false, error: res.error }
-        }
-        ref = res.reference
-      }
-
       const days = billing === 'year' ? 365 : 30
       const periodEnd = new Date(Date.now() + 86400000 * days).toISOString()
       const inv: Invoice | null = amount > 0 ? {
@@ -699,8 +719,8 @@ export function Provider({ children }: { children: ReactNode }) {
         planId,
         planName: plan.name,
         billing,
-        amountXof: billingSimulation ? 0 : amount,
-        provider: billingSimulation ? `${provider} (simulation)` : provider,
+        amountXof: 0,
+        provider: `${provider} (simulation)`,
         reference: ref,
         status: 'paid'
       } : null
@@ -715,9 +735,7 @@ export function Provider({ children }: { children: ReactNode }) {
       toast(
         planId === 'free'
           ? 'Formule gratuite activée.'
-          : billingSimulation
-            ? `Kora ${plan.name} activé gratuitement (simulation) !`
-            : `Kora ${plan.name} activé !`,
+          : `Kora ${plan.name} activé gratuitement (simulation) !`,
         'ok'
       )
       return { ok: true }

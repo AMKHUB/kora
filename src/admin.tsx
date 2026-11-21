@@ -90,6 +90,12 @@ function Stats() {
     bucket: 'kora-videos',
     maxVideoMb: 50
   })
+  const [saspayStatus, setSaspayStatus] = useState<{ configured: boolean; webhookConfigured: boolean; mode: string }>({
+    configured: false,
+    webhookConfigured: false,
+    mode: 'unconfigured'
+  })
+  const [saspayTestMsg, setSaspayTestMsg] = useState('')
   const [err, setErr] = useState('')
   const [maintDraft, setMaintDraft] = useState(maintenanceMessage)
   const [ctrlBusy, setCtrlBusy] = useState(false)
@@ -97,12 +103,13 @@ function Stats() {
   useEffect(() => { setMaintDraft(maintenanceMessage) }, [maintenanceMessage])
 
   useEffect(() => {
-    apiGet<{ stats: any; logs: any[]; r2Status?: any }>('/api/admin?action=stats').then(r => {
+    apiGet<{ stats: any; logs: any[]; r2Status?: any; saspayStatus?: any }>('/api/admin?action=stats').then(r => {
       if (!r.ok) setErr(r.data.error || 'Erreur de chargement.')
       else {
         setS(r.data.stats)
         setLogs(r.data.logs || [])
         if (r.data.r2Status) setR2Status(r.data.r2Status)
+        if (r.data.saspayStatus) setSaspayStatus(r.data.saspayStatus)
       }
     })
   }, [])
@@ -254,6 +261,51 @@ function Stats() {
               >
                 <Icon n="upload" s={18} />
                 Ouvrir Cloudflare R2 ({r2Status.bucket})
+              </a>
+            </div>
+          </div>
+
+          <div className="control-card">
+            <div className="control-top">
+              <div>
+                <strong>Passerelle de Paiement SasPay (Mobile Money & Carte)</strong>
+                <p className="mu">
+                  {saspayStatus.configured
+                    ? `Connectée (${saspayStatus.mode === 'live' ? 'Mode Production' : 'Mode Test'}) · Notifications automatiques ${saspayStatus.webhookConfigured ? 'activées' : 'en attente de configuration'}.`
+                    : 'Prête pour l’encaissement (Orange Money, Wave, Moov Money, MTN MoMo, Carte) et les retraits créateurs.'}
+                </p>
+                <small className="mu">Adresse de notification à renseigner dans votre espace marchand SasPay : {location.origin}/api/webhooks/saspay</small>
+              </div>
+              <span className={saspayStatus.configured ? 'pill-ok' : 'pill-spec'}>
+                {saspayStatus.configured ? (saspayStatus.mode === 'live' ? 'SasPay Production' : 'SasPay Test') : 'Configuration marchand requise'}
+              </span>
+            </div>
+            {saspayTestMsg && <p className="status-box" role="status">{saspayTestMsg}</p>}
+            <div className="btns flush">
+              <button
+                type="button"
+                className="btn"
+                disabled={ctrlBusy}
+                onClick={async () => {
+                  setCtrlBusy(true); setSaspayTestMsg('Vérification de la connexion avec SasPay…')
+                  const cRes = await apiGet<{ countries?: any[] }>('/api/checkout?action=countries')
+                  const rRes = await apiGet<{ rates?: any[]; error?: string }>('/api/checkout?action=my-rates')
+                  setCtrlBusy(false)
+                  const count = Array.isArray(cRes.data?.countries) ? cRes.data.countries.length : 0
+                  if (rRes.ok && Array.isArray(rRes.data?.rates)) {
+                    setSaspayTestMsg(`SasPay connecté : ${count} pays référencés · ${rRes.data.rates.length} réseaux actifs sur votre compte marchand.`)
+                  } else if (cRes.ok) {
+                    setSaspayTestMsg(`Service SasPay joignable (${count} pays disponibles). ${rRes.data?.error || 'Activez votre compte marchand pour consulter vos grilles tarifaires.'}`)
+                  } else {
+                    setSaspayTestMsg('Impossible de joindre SasPay.')
+                  }
+                }}
+              >
+                <Icon n="card" s={18} />
+                Tester la connexion SasPay
+              </button>
+              <a className="btn" href="https://app.saspay.me" target="_blank" rel="noopener noreferrer">
+                Tableau de bord SasPay
               </a>
             </div>
           </div>

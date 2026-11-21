@@ -14,6 +14,7 @@ import {
   validateUploadMeta
 } from '../server/supabaseServer.js'
 import { createR2UploadUrl, getR2Config, isR2Configured } from '../server/r2Storage.js'
+import { getSaspayConfig } from '../server/saspay.js'
 
 const UUID_RE = /^[0-9a-f-]{36}$/i
 const VALID_ROLES = new Set(['user', 'moderator', 'admin'])
@@ -63,6 +64,7 @@ export default async function handler(req, res) {
       if (stats.error) return safeError(res, 400, 'Impossible de charger les statistiques.', stats.error)
       const r2 = getR2Config()
       const r2Active = r2.configured || Boolean(ps?.r2Enabled)
+      const sp = getSaspayConfig()
       return sendJson(res, 200, {
         stats: stats.data,
         logs: logs.data || [],
@@ -72,6 +74,11 @@ export default async function handler(req, res) {
           accountId: r2.accountId,
           bucket: r2.bucket,
           maxVideoMb: r2Active ? 5120 : 50
+        },
+        saspayStatus: {
+          configured: sp.configured,
+          webhookConfigured: sp.webhookConfigured,
+          mode: sp.mode
         }
       })
     }
