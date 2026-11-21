@@ -690,7 +690,7 @@ export function Provider({ children }: { children: ReactNode }) {
         periodEnd,
         invoices: s.invoices.some(i => i.reference === reference) ? s.invoices : [inv, ...s.invoices]
       }))
-      toast(`Paiement vérifié (SUCCESS) — Kora ${plan.name} est activé !`, 'ok')
+      toast(`Paiement confirmé — Kora ${plan.name} est activé !`, 'ok')
     },
     subscribePlan: async (planId, billing, provider, customerRef = '') => {
       if (!requireAuth('gérer votre abonnement')) return { ok: false, error: 'Connexion requise.' }
@@ -699,7 +699,7 @@ export function Provider({ children }: { children: ReactNode }) {
       const ref = `SIM-${Date.now().toString(36).toUpperCase()}`
 
       if (planId !== 'free' && !billingSimulation) {
-        return { ok: false, error: 'Veuillez finaliser et vérifier le paiement SasPay (statut SUCCESS requis).' }
+        return { ok: false, error: 'Veuillez finaliser et confirmer votre paiement pour activer cet abonnement.' }
       }
 
       if (planId !== 'free' && billingSimulation) {

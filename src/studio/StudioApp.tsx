@@ -121,7 +121,6 @@ export default function StudioApp() {
   const [tab, setTab] = useState<StudioTab>('browse')
   const [channel, setChannel] = useState<ChannelInfo>(DEFAULT_CHANNEL)
   const [titles, setTitles] = useState<StudioTitle[]>([])
-  const [r2Enabled, setR2Enabled] = useState(false)
   const [publicItems, setPublicItems] = useState<PublicCatalogItem[]>([])
   const [publicLoading, setPublicLoading] = useState(true)
   const [publicSearch, setPublicSearch] = useState('')
@@ -146,11 +145,10 @@ export default function StudioApp() {
   }
 
   const loadCloudCreatorData = async () => {
-    const r = await apiGet<{ channel: ChannelInfo | null; titles: StudioTitle[]; r2Enabled?: boolean }>('/api/studio?action=data')
+    const r = await apiGet<{ channel: ChannelInfo | null; titles: StudioTitle[] }>('/api/studio?action=data')
     if (r.ok) {
       if (r.data.channel) setChannel(r.data.channel)
       setTitles(r.data.titles || [])
-      setR2Enabled(Boolean(r.data.r2Enabled))
     }
   }
 
@@ -485,7 +483,7 @@ export default function StudioApp() {
                   <div className="page-head">
                     <div>
                       <h1>Bonjour, {channel.channel_name}</h1>
-                      <p className="mu">Gérez vos publications, téléversez vos films jusqu’à 5 Go et suivez vos performances.</p>
+                      <p className="mu">Gérez vos publications, mettez en ligne vos films et séries et suivez vos performances.</p>
                     </div>
                     <button type="button" className="btn accent" onClick={startNewUpload}>
                       <Icon n="upload" s={18} />Téléverser une œuvre
@@ -509,9 +507,9 @@ export default function StudioApp() {
                       <span className="tt-kpi-sub">Séries & Saisons</span>
                     </div>
                     <div className="tt-kpi">
-                      <span className="tt-kpi-label">Stockage vidéo</span>
-                      <strong className="tt-kpi-val">{r2Enabled ? '5 Go' : '50 Mo'}</strong>
-                      <span className="tt-kpi-sub">{r2Enabled ? 'Cloudflare R2 Actif' : 'Mode standard'}</span>
+                      <span className="tt-kpi-label">Brouillons</span>
+                      <strong className="tt-kpi-val">{Math.max(0, titles.length - publishedCount)}</strong>
+                      <span className="tt-kpi-sub">En attente de publication</span>
                     </div>
                   </div>
 
@@ -605,7 +603,6 @@ export default function StudioApp() {
                   key={editing ? `edit-${editing.id}` : 'new'}
                   initial={editing}
                   channel={channel}
-                  r2Enabled={r2Enabled}
                   onSaved={async (saved) => {
                     await Promise.all([loadCloudCreatorData(), loadPublicCatalog()])
                     notify(saved.status === 'published' ? `« ${saved.title} » est publié sur Kora !` : `« ${saved.title} » enregistré en brouillon.`)
@@ -656,7 +653,7 @@ export default function StudioApp() {
                     <div className="tt-kpi">
                       <span className="tt-kpi-label">Épisodes disponibles</span>
                       <strong className="tt-kpi-val">{totalEpisodes}</strong>
-                      <span className="tt-kpi-sub">Streaming adaptatif</span>
+                      <span className="tt-kpi-sub">Disponibles en lecture</span>
                     </div>
                     <div className="tt-kpi">
                       <span className="tt-kpi-label">Partage revenus</span>
@@ -664,9 +661,9 @@ export default function StudioApp() {
                       <span className="tt-kpi-sub">Publicité & Premium</span>
                     </div>
                     <div className="tt-kpi">
-                      <span className="tt-kpi-label">Passerelle retraits</span>
-                      <strong className="tt-kpi-val">SasPay</strong>
-                      <span className="tt-kpi-sub">Mobile Money Afrique</span>
+                      <span className="tt-kpi-label">Versements</span>
+                      <strong className="tt-kpi-val">Mobile Money</strong>
+                      <span className="tt-kpi-sub">Retraits directs</span>
                     </div>
                   </div>
 
@@ -851,10 +848,9 @@ function StudioAuthForm({ recovery, initialMsg = '', onSuccess, onBrowse }: {
 /* ============================================================================
    ASSISTANT DE MISE EN LIGNE (4 ÉTAPES FAÇON YOUTUBE STUDIO)
    ============================================================================ */
-function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
+function UploadWizard({ initial, channel, onSaved, onCancel }: {
   initial: StudioTitle | null
   channel: ChannelInfo
-  r2Enabled: boolean
   onSaved: (t: { title: string; status: string }) => Promise<void>
   onCancel: () => void
 }) {
@@ -1191,7 +1187,7 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
                     <button type="button" className="btn" onClick={addNewSeason}><Icon n="plus" s={16} />+ Nouvelle saison</button>
                   </div>
                 </div>
-                <p className="mu">Importez le fichier vidéo (MP4, WebM, MOV) et le synopsis de chaque épisode, comme une playlist sur YouTube Studio.</p>
+                <p className="mu">Importez la vidéo et le synopsis de chaque épisode de votre série.</p>
                 {episodes.map(ep => (
                   <div key={ep.localId} className="ep-studio-item">
                     <div className="ep-studio-head">
@@ -1228,8 +1224,8 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
                         <span className="pill-ok">Vidéo déjà en ligne · cliquez pour remplacer</span>
                       ) : (
                         <>
-                          <strong>Déposez ou choisissez la vidéo de l’épisode (MP4, WebM, MOV)</strong>
-                          <span className="mu">{r2Enabled ? 'Jusqu’à 5 Go par fichier (Cloudflare R2)' : 'Limite 50 Mo par fichier'}</span>
+                          <strong>Déposez ou choisissez la vidéo de l’épisode</strong>
+                          <span className="mu">Formats acceptés : MP4, WebM ou MOV</span>
                         </>
                       )}
                     </div>
@@ -1252,7 +1248,7 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
                   <input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={e => handleMainVideo(e.target.files?.[0])} aria-label="Téléverser le fichier vidéo" />
                   <div className="drop-icon"><Icon n="upload" s={26} /></div>
                   <strong>Glissez-déposez votre fichier vidéo ici</strong>
-                  <span className="mu">{r2Enabled ? 'MP4, WebM ou MOV · jusqu’à 5 Go (Cloudflare R2)' : 'MP4, WebM ou MOV · 50 Mo max'}</span>
+                  <span className="mu">Formats acceptés : MP4, WebM ou MOV</span>
                   {mainVideoFile && <span className="pill-ok">{mainVideoFile.name} ({Math.max(1, Math.round(mainVideoFile.size / 1048576))} Mo)</span>}
                 </div>
                 {mainVideoPreview && (
@@ -1263,7 +1259,7 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
 
                 <div className="ep-studio-item">
                   <div className="ep-studio-head">
-                    <strong>Sous-titres synchronisés avec la voix (.vtt / .srt / IA)</strong>
+                    <strong>Sous-titres synchronisés</strong>
                     <select value={subLang} onChange={e => setSubLang(e.target.value)} aria-label="Langue des sous-titres" style={{ minHeight: 36 }}>
                       {LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
                     </select>
@@ -1271,7 +1267,7 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
                   <div className="btns flush">
                     <label className="btn" style={{ cursor: 'pointer' }}>
                       <Icon n="upload" s={16} />
-                      <span>{subFile ? `Fichier : ${subFile.name}` : 'Importer .vtt / .srt'}</span>
+                      <span>{subFile ? `Fichier : ${subFile.name}` : 'Importer des sous-titres'}</span>
                       <input type="file" accept=".vtt,.srt,text/vtt,text/plain" style={{ display: 'none' }} onChange={e => setSubFile(e.target.files?.[0] || null)} />
                     </label>
                     {initial?.id && (
@@ -1380,11 +1376,11 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
           </div>
           <div className="tt-spec-strip" style={{ marginTop: 0 }}>
             <div className="tt-spec-box">
-              <strong>Capacité vidéo</strong>
-              <span>{r2Enabled ? 'Jusqu’à 5 Go · Cloudflare R2' : '50 Mo max'}</span>
+              <strong>Visibilité</strong>
+              <span>{status === 'published' ? 'Publique sur Kora' : 'Brouillon privé'}</span>
             </div>
             <div className="tt-spec-box">
-              <strong>Format & Episodes</strong>
+              <strong>Format & Épisodes</strong>
               <span>{type === 'series' ? `${Math.max(1, ...episodes.map(e => e.season))} saison(s) · ${episodes.length} ép.` : `${dur} min`}</span>
             </div>
           </div>
@@ -1444,8 +1440,8 @@ function CreatorPayoutSection({ notify }: { notify: (msg: string, kind?: 'ok' | 
     }
     setIdempKey(createIntentIdempotencyKey('payout'))
     setMsisdn('')
-    setMsg(`Retrait SasPay initialisé (${r.data.payoutId}). Cliquez sur « Vérifier » pour suivre son exécution.`)
-    notify('Retrait SasPay initialisé !', 'ok')
+    setMsg(`Demande de retrait enregistrée (${r.data.payoutId}). Cliquez sur « Vérifier » pour suivre son avancement.`)
+    notify('Demande de retrait enregistrée !', 'ok')
     loadPayouts()
   }
 
@@ -1457,14 +1453,15 @@ function CreatorPayoutSection({ notify }: { notify: (msg: string, kind?: 'ok' | 
       notify(r.data.error || 'Vérification impossible.', 'err')
       return
     }
-    notify(`Statut du retrait : ${r.data.status}`, r.data.status === 'SUCCESS' ? 'ok' : 'info')
+    const label = r.data.status === 'SUCCESS' ? 'Validé' : r.data.status === 'FAILED' ? 'Refusé' : 'En cours'
+    notify(`Statut du retrait : ${label}`, r.data.status === 'SUCCESS' ? 'ok' : 'info')
     loadPayouts()
   }
 
   return (
     <section className="panel form" style={{ maxWidth: 'none', marginTop: 18 }}>
       <div>
-        <h2>Retrait de revenus Mobile Money via SasPay</h2>
+        <h2>Retrait de revenus Mobile Money</h2>
         <p className="mu">
           Demandez un reversement direct vers votre numéro Mobile Money dans la devise de votre pays.
         </p>
@@ -1527,7 +1524,7 @@ function CreatorPayoutSection({ notify }: { notify: (msg: string, kind?: 'ok' | 
         <div className="tw" style={{ marginTop: 12 }}>
           <table>
             <thead>
-              <tr><th>ID SasPay</th><th>Pays / Réseau</th><th>Numéro</th><th>Montant</th><th>Net reçu</th><th>Statut</th><th>Action</th></tr>
+              <tr><th>Référence</th><th>Pays / Réseau</th><th>Numéro</th><th>Montant</th><th>Net reçu</th><th>Statut</th><th>Action</th></tr>
             </thead>
             <tbody>
               {payouts.map(p => (
@@ -1539,7 +1536,7 @@ function CreatorPayoutSection({ notify }: { notify: (msg: string, kind?: 'ok' | 
                   <td>{p.net_amount ? `${p.net_amount} ${p.currency}` : '—'}</td>
                   <td>
                     <span className={p.status === 'SUCCESS' ? 'pill-ok' : p.status === 'FAILED' ? 'pill-accent' : 'pill-spec'}>
-                      {p.status}
+                      {p.status === 'SUCCESS' ? 'Validé' : p.status === 'FAILED' ? 'Refusé' : 'En cours'}
                     </span>
                   </td>
                   <td>

@@ -258,7 +258,7 @@ export default async function handler(req, res) {
       if (efResp.ok && efData?.signedUrl) {
         return sendJson(res, 200, { signedUrl: efData.signedUrl, path: efData.storagePath, publicUrl: null, provider: 'r2' })
       }
-      return sendJson(res, 500, { error: efData?.error || 'Impossible de préparer le téléversement Cloudflare R2.' })
+      return sendJson(res, 500, { error: efData?.error || 'Impossible de préparer l’envoi du fichier.' })
     }
 
     const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path)

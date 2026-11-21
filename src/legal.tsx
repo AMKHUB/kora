@@ -22,7 +22,7 @@ export const Privacy = () => (
     <h2>5. Protection des profils enfants</h2>
     <p>Un profil enfant filtre automatiquement le catalogue aux œuvres « Tous publics » et « 7+ », désactive les publicités personnalisées et peut être séparé des profils adultes par un code PIN à 4 chiffres.</p>
     <h2>6. Conservation & sécurité</h2>
-    <p>Tous les échanges sont chiffrés en HTTPS/TLS (HSTS). Les flux vidéo privés sont servis par liens signés temporaires. Vos données sont hébergées sur une infrastructure PostgreSQL sécurisée avec isolation par ligne (RLS) et supprimées ou anonymisées à la clôture de votre compte.</p>
+    <p>Tous les échanges sont chiffrés et sécurisés. L’accès aux vidéos est protégé par des liens temporaires privés. Vos données sont hébergées sur une infrastructure sécurisée à accès cloisonné et supprimées ou anonymisées à la clôture de votre compte.</p>
     <h2>7. Vos droits</h2>
     <p>Conformément aux réglementations applicables et aux recommandations de l’Autorité de protection des données à caractère personnel du Mali (APDP), vous disposez d’un droit d’accès, de rectification, de suppression, d’opposition et de portabilité de vos données.</p>
   </Doc>

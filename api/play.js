@@ -73,7 +73,7 @@ export default async function handler(req, res) {
           subtitles: Array.isArray(data.subtitles) ? data.subtitles : []
         })
       }
-      return sendJson(res, 503, { error: 'Le stockage vidéo Cloudflare R2 n’est pas encore activé sur le serveur.' })
+      return sendJson(res, 503, { error: 'La lecture vidéo est momentanément indisponible.' })
     }
     if (resp.status === 402 || resp.status === 403) {
       return sendJson(res, resp.status, { error: data?.error || 'Accès restreint.' })

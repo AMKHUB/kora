@@ -239,43 +239,31 @@ function Stats() {
           <div className="control-card">
             <div className="control-top">
               <div>
-                <strong>Stockage Vidéo Grande Capacité (Cloudflare R2)</strong>
+                <strong>Hébergement Vidéo</strong>
                 <p className="mu">
                   {r2Status.configured
-                    ? `Connecté au compartiment « ${r2Status.bucket} » · Téléversement jusqu’à 5 Go par film ou épisode · Bande passante 0 €.`
-                    : 'Prêt pour vos longs-métrages (jusqu’à 5 Go/fichier et bande passante gratuite). En attendant l’activation de votre compartiment R2, le stockage standard 50 Mo assure automatiquement le relais.'}
+                    ? 'Service vidéo haute capacité actif et prêt pour la diffusion des films, séries et épisodes.'
+                    : 'Service vidéo en mode standard.'}
                 </p>
               </div>
               <span className={r2Status.configured ? 'pill-ok' : 'pill-spec'}>
-                {r2Status.configured ? 'Cloudflare R2 Actif (5 Go)' : 'Relais 50 Mo actif'}
+                {r2Status.configured ? 'Actif' : 'Standard'}
               </span>
-            </div>
-            <div className="btns flush">
-              <a
-                className="btn"
-                href={`https://dash.cloudflare.com/${r2Status.accountId}/r2/overview`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Icon n="upload" s={18} />
-                Ouvrir Cloudflare R2 ({r2Status.bucket})
-              </a>
             </div>
           </div>
 
           <div className="control-card">
             <div className="control-top">
               <div>
-                <strong>Passerelle de Paiement SasPay (Mobile Money & Carte)</strong>
+                <strong>Service de Paiement (Mobile Money & Carte)</strong>
                 <p className="mu">
                   {saspayStatus.configured
-                    ? `Connectée (${saspayStatus.mode === 'live' ? 'Mode Production' : 'Mode Test'}) · Notifications automatiques ${saspayStatus.webhookConfigured ? 'activées' : 'en attente de configuration'}.`
-                    : 'Prête pour l’encaissement (Orange Money, Wave, Moov Money, MTN MoMo, Carte) et les retraits créateurs.'}
+                    ? `Connecté (${saspayStatus.mode === 'live' ? 'Mode Réel' : 'Mode Test'}) · Confirmations automatiques ${saspayStatus.webhookConfigured ? 'actives' : 'en attente'}.`
+                    : 'Prêt pour l’encaissement (Orange Money, Wave, Moov Money, MTN MoMo, Carte) et les retraits créateurs.'}
                 </p>
-                <small className="mu">Adresse de notification à renseigner dans votre espace marchand SasPay : {location.origin}/api/webhooks/saspay</small>
               </div>
               <span className={saspayStatus.configured ? 'pill-ok' : 'pill-spec'}>
-                {saspayStatus.configured ? (saspayStatus.mode === 'live' ? 'SasPay Production' : 'SasPay Test') : 'Configuration marchand requise'}
+                {saspayStatus.configured ? (saspayStatus.mode === 'live' ? 'Mode Réel' : 'Mode Test') : 'Configuration requise'}
               </span>
             </div>
             {saspayTestMsg && <p className="status-box" role="status">{saspayTestMsg}</p>}
@@ -285,26 +273,23 @@ function Stats() {
                 className="btn"
                 disabled={ctrlBusy}
                 onClick={async () => {
-                  setCtrlBusy(true); setSaspayTestMsg('Vérification de la connexion avec SasPay…')
+                  setCtrlBusy(true); setSaspayTestMsg('Vérification du service de paiement…')
                   const cRes = await apiGet<{ countries?: any[] }>('/api/checkout?action=countries')
                   const rRes = await apiGet<{ rates?: any[]; error?: string }>('/api/checkout?action=my-rates')
                   setCtrlBusy(false)
                   const count = Array.isArray(cRes.data?.countries) ? cRes.data.countries.length : 0
                   if (rRes.ok && Array.isArray(rRes.data?.rates)) {
-                    setSaspayTestMsg(`SasPay connecté : ${count} pays référencés · ${rRes.data.rates.length} réseaux actifs sur votre compte marchand.`)
+                    setSaspayTestMsg(`Service opérationnel : ${count} pays disponibles · ${rRes.data.rates.length} réseaux actifs.`)
                   } else if (cRes.ok) {
-                    setSaspayTestMsg(`Service SasPay joignable (${count} pays disponibles). ${rRes.data?.error || 'Activez votre compte marchand pour consulter vos grilles tarifaires.'}`)
+                    setSaspayTestMsg(`Service joignable (${count} pays disponibles). ${rRes.data?.error || ''}`.trim())
                   } else {
-                    setSaspayTestMsg('Impossible de joindre SasPay.')
+                    setSaspayTestMsg('Service de paiement momentanément indisponible.')
                   }
                 }}
               >
                 <Icon n="card" s={18} />
-                Tester la connexion SasPay
+                Vérifier le service de paiement
               </button>
-              <a className="btn" href="https://app.saspay.me" target="_blank" rel="noopener noreferrer">
-                Tableau de bord SasPay
-              </a>
             </div>
           </div>
         </div>
@@ -435,7 +420,7 @@ function RightsManager() {
   return (
     <section className="panel">
       <h2>Droits de diffusion par pays</h2>
-      <p className="mu">Définissez les territoires autorisés et le niveau d’accès requis (contrôlé côté serveur lors de la lecture).</p>
+      <p className="mu">Définissez les territoires autorisés et le niveau d’accès requis pour chaque œuvre.</p>
       <form className="inline" onSubmit={add}>
         <label>Titre
           <select value={titleId} onChange={e => setTitleId(e.target.value)}>

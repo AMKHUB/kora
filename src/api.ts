@@ -81,8 +81,8 @@ export async function uploadFileToSignedUrl(signedUrl: string, file: File): Prom
       return {
         ok: false,
         error: large
-          ? (isR2 ? 'Fichier trop volumineux (limite 5 Go sur Cloudflare R2).' : 'Fichier trop volumineux (limite 50 Mo).')
-          : `Échec du téléversement (${res.status}).`
+          ? 'Fichier trop volumineux.'
+          : 'Échec de l’envoi du fichier. Veuillez réessayer.'
       }
     }
     return { ok: true }

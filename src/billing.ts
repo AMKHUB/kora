@@ -199,7 +199,7 @@ export async function processPaymentCheckout(req: CheckoutRequest, isSimulation:
   if (!res.ok) {
     return {
       ok: false,
-      error: res.data.error || 'Paiement refusé ou passerelle SasPay non configurée côté serveur.',
+      error: res.data.error || 'Le paiement n’a pas pu être initialisé. Veuillez réessayer.',
       code: res.data.code,
       otpRequired: Boolean(res.data.otpRequired),
       otpInstructions: res.data.otpInstructions
@@ -226,7 +226,7 @@ export async function verifySaspayPayment(params: { paymentId?: string; sessionI
       ok: false,
       status: 'PENDING',
       delivered: false,
-      error: res.data.error || 'Impossible de vérifier le paiement auprès de SasPay.'
+      error: res.data.error || 'Impossible de vérifier le paiement pour le moment.'
     }
   }
   return {
@@ -249,7 +249,7 @@ export async function confirmSaspayPaymentOtp(paymentId: string, otp: string): P
       ok: false,
       status: 'PENDING',
       delivered: false,
-      error: res.data.error || 'Échec de la confirmation du code OTP.'
+      error: res.data.error || 'Code de validation invalide.'
     }
   }
   return {

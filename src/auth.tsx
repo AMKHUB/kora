@@ -271,7 +271,7 @@ export function Auth({ q }: { q: URLSearchParams }) {
         <div className="auth-card">
           <BrandLogo height={36} />
           <h1>Authentification non configurée</h1>
-          <p className="mu">Le serveur d’authentification n’est pas encore configuré sur cette instance.</p>
+          <p className="mu">Le service de connexion est temporairement indisponible.</p>
           <a className="btn p" href="#/">Retour au catalogue</a>
         </div>
       </div>

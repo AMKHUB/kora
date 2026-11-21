@@ -122,12 +122,12 @@ export function Home() {
               <div className="pillar-card">
                 <Icon n="captions" s={22} />
                 <strong>Streaming & Voix claire</strong>
-                <small className="mu">HLS adaptatif 3G/4G/4K et sous-titres synchronisés à la voix.</small>
+                <small className="mu">Lecture fluide jusqu’en 4K et sous-titres synchronisés.</small>
               </div>
               <div className="pillar-card">
                 <Icon n="studio" s={22} />
-                <strong>Studio Créateurs</strong>
-                <small className="mu">Mettez en ligne vos saisons, épisodes et couvertures comme sur YouTube Studio.</small>
+                <strong>Kora Studio</strong>
+                <small className="mu">Mettez en ligne vos films, séries, saisons et affiches depuis votre espace créateur.</small>
               </div>
             </div>
           </div>
@@ -990,9 +990,9 @@ export function Settings() {
         <p className="mu">Choisissez l’ambiance conforme à la charte Kora (mode sombre recommandé pour le cinéma).</p>
         <div className="theme-grid" role="radiogroup" aria-label="Thème de l’interface">
           {([
-            ['dark', 'Sombre Kora', 'Obsidienne chaude #16140F & or #F2C334'],
-            ['black', 'Cinéma OLED', 'Noir absolu #000000 pour les écrans sombres'],
-            ['light', 'Clair éditorial', 'Crème papier #FBF9F4 & or profond #906D03']
+            ['dark', 'Sombre Kora', 'Obsidienne chaude et touches dorées'],
+            ['black', 'Cinéma OLED', 'Noir profond idéal pour le visionnage nocturne'],
+            ['light', 'Clair éditorial', 'Fond clair chaleureux pour la lecture de jour']
           ] as [ThemeMode, string, string][]).map(([id, label, desc]) => (
             <button
               key={id}
@@ -1185,7 +1185,7 @@ export function Subscription() {
           pendingTx.planId,
           pendingTx.billing,
           pendingTx.providerLabel,
-          ver.reference || pendingTx.paymentId || pendingTx.sessionId || 'SASPAY',
+          ver.reference || pendingTx.paymentId || pendingTx.sessionId || 'KORA',
           ver.charged || undefined
         )
         savePendingTx(null)
@@ -1243,10 +1243,10 @@ export function Subscription() {
     }
 
     const providerLabel = flowMode === 'hosted'
-      ? 'SasPay Checkout'
+      ? 'Paiement en ligne'
       : isCard
-        ? 'Carte bancaire (SasPay)'
-        : (activeNet?.label || 'Mobile Money (SasPay)')
+        ? 'Carte bancaire'
+        : (activeNet?.label || 'Mobile Money')
 
     const res = await processPaymentCheckout({
       planId: checkoutPlan,
@@ -1265,7 +1265,7 @@ export function Subscription() {
     if (!res.ok) {
       if (res.otpRequired) {
         setForcePreOtp(true)
-        setOtpHint(res.otpInstructions || 'Composez le code USSD de votre opérateur pour obtenir votre code OTP avant de valider.')
+        setOtpHint(res.otpInstructions || 'Obtenez votre code de confirmation auprès de votre opérateur avant de valider.')
       }
       // Si ce n'est pas une erreur réseau (502/503/429), on régénère une clé d'idempotence pour la correction des paramètres
       if (res.code && res.code !== 'network_error' && res.code !== 'rate_limited') {
@@ -1288,20 +1288,18 @@ export function Subscription() {
     }
     savePendingTx(nextPending)
 
-    // Règle SasPay obligatoire : si checkout_url est non vide après un softpay (Wave, Orange Money, Djamo, Carte)
-    // ou une session checkout, il faut rediriger le client vers cette URL.
     if (res.checkoutUrl && res.checkoutUrl.trim().length > 0) {
-      setPayInfo('Redirection vers la page de paiement sécurisée SasPay…')
+      setPayInfo('Redirection vers la page de paiement sécurisée…')
       window.location.assign(res.checkoutUrl)
       return
     }
 
-    setPayInfo('Demande poussée sur votre téléphone. Validez sur votre mobile puis cliquez sur « Vérifier le statut SasPay ».')
+    setPayInfo('Demande envoyée sur votre téléphone. Validez sur votre mobile puis cliquez sur « Vérifier mon paiement ».')
   }
 
   const handleVerifyNow = async () => {
     if (!pendingTx) return
-    setBusy(true); setPayErr(''); setPayInfo('Vérification de votre paiement en temps réel auprès de SasPay…')
+    setBusy(true); setPayErr(''); setPayInfo('Vérification de votre paiement en cours…')
     const ver = await verifySaspayPayment({
       paymentId: pendingTx.paymentId,
       sessionId: pendingTx.sessionId
@@ -1319,7 +1317,7 @@ export function Subscription() {
         pendingTx.planId,
         pendingTx.billing,
         pendingTx.providerLabel,
-        ver.reference || pendingTx.paymentId || pendingTx.sessionId || 'SASPAY',
+        ver.reference || pendingTx.paymentId || pendingTx.sessionId || 'KORA',
         ver.charged || undefined
       )
       savePendingTx(null)
@@ -1331,21 +1329,21 @@ export function Subscription() {
     if (ver.status === 'FAILED') {
       savePendingTx({ ...pendingTx, status: 'FAILED', paymentId: ver.paymentId || pendingTx.paymentId })
       setPayInfo('')
-      setPayErr('Le paiement a échoué (FAILED). Vous pouvez relancer cette transaction ci-dessous sans double débit.')
+      setPayErr('Le paiement n’a pas abouti. Vous pouvez réessayer ci-dessous sans risque de double débit.')
       return
     }
 
-    setPayInfo('Statut actuel : PENDING (en attente de confirmation sur votre mobile). Aucun accès n’est livré avant le statut SUCCESS.')
+    setPayInfo('Paiement en attente de validation sur votre mobile. Votre abonnement sera activé dès confirmation.')
   }
 
   const handleConfirmPostOtp = async () => {
     if (!pendingTx?.paymentId || !postOtp.trim()) return
-    setBusy(true); setPayErr(''); setPayInfo('Confirmation du code OTP auprès de SasPay…')
+    setBusy(true); setPayErr(''); setPayInfo('Validation de votre code de confirmation…')
     const res = await confirmSaspayPaymentOtp(pendingTx.paymentId, postOtp.trim())
     setBusy(false)
     if (!res.ok) {
       setPayInfo('')
-      setPayErr(res.error || 'Code OTP refusé.')
+      setPayErr(res.error || 'Code de confirmation refusé.')
       return
     }
     if (res.status === 'SUCCESS' && res.delivered) {
@@ -1361,12 +1359,12 @@ export function Subscription() {
       setPostOtp('')
       return
     }
-    setPayInfo(`Code OTP transmis. Statut : ${res.status}. Cliquez sur « Vérifier le statut SasPay » pour finaliser.`)
+    setPayInfo('Code transmis. Cliquez sur « Vérifier mon paiement » pour finaliser l’activation.')
   }
 
   const handleRetryFailed = async () => {
     if (!pendingTx?.paymentId) return
-    setBusy(true); setPayErr(''); setPayInfo('Relance de la transaction existante auprès de SasPay…')
+    setBusy(true); setPayErr(''); setPayInfo('Relance du paiement en cours…')
     const retryKey = createIntentIdempotencyKey(`retry-${pendingTx.paymentId.slice(0, 8)}`)
     const res = await retrySaspayPayment({
       paymentId: pendingTx.paymentId,
@@ -1375,7 +1373,7 @@ export function Subscription() {
     setBusy(false)
     if (!res.ok) {
       setPayInfo('')
-      setPayErr(res.error || 'Impossible de relancer cette transaction.')
+      setPayErr(res.error || 'Impossible de relancer ce paiement.')
       return
     }
     savePendingTx({ ...pendingTx, status: 'PENDING', checkoutUrl: res.checkoutUrl || pendingTx.checkoutUrl })
@@ -1383,18 +1381,20 @@ export function Subscription() {
       window.location.assign(res.checkoutUrl)
       return
     }
-    setPayInfo('Transaction relancée ! Validez sur votre téléphone puis vérifiez le statut.')
+    setPayInfo('Paiement relancé ! Validez sur votre téléphone puis vérifiez la confirmation.')
   }
+
+  const pendingStatusLabel = pendingTx?.status === 'FAILED' ? 'Non abouti' : 'En attente'
 
   return (
     <div className="page sub-page">
       <div className="sub-hero">
-        <span className="pill-accent">{billingSimulation ? 'Offre découverte · Activation gratuite' : 'Offres & Abonnements Kora · SasPay'}</span>
+        <span className="pill-accent">{billingSimulation ? 'Offre découverte · Activation gratuite' : 'Offres & Abonnements Kora'}</span>
         <h1>Choisissez votre formule</h1>
         <p className="mu">
           {billingSimulation
             ? 'Pendant notre phase de lancement, activez gratuitement votre formule Kora Premium ou Famille en un clic et profitez du catalogue sans publicité jusqu’en 4K.'
-            : 'Sans engagement. Paiement sécurisé via SasPay (Orange Money, Wave, Moov Money, MTN MoMo ou carte bancaire).'}
+            : 'Sans engagement. Paiement sécurisé par Orange Money, Wave, Moov Money, MTN MoMo ou carte bancaire.'}
         </p>
 
         <div className="billing-toggle" role="group" aria-label="Fréquence de facturation">
@@ -1418,14 +1418,14 @@ export function Subscription() {
         <section className="panel" aria-live="polite">
           <div className="panel-head">
             <div>
-              <h2>Transaction SasPay en cours de vérification ({pendingTx.status})</h2>
+              <h2>Paiement en cours de confirmation</h2>
               <p className="mu">
                 Référence : <strong>{pendingTx.paymentId || pendingTx.sessionId}</strong> · {pendingTx.providerLabel}.
-                L’abonnement est activé uniquement lorsque SasPay confirme le statut <strong>SUCCESS</strong>.
+                Votre abonnement est activé automatiquement dès confirmation du paiement.
               </p>
             </div>
             <span className={pendingTx.status === 'FAILED' ? 'pill-accent' : 'pill-spec'}>
-              {pendingTx.status}
+              {pendingStatusLabel}
             </span>
           </div>
           {payInfo && <p className="status-box" role="status">{payInfo}</p>}
@@ -1433,11 +1433,11 @@ export function Subscription() {
           <div className="btns flush">
             <button type="button" className="btn p" disabled={busy} onClick={handleVerifyNow}>
               <Icon n="check" s={18} />
-              {busy ? 'Vérification…' : 'Vérifier le statut SasPay maintenant'}
+              {busy ? 'Vérification…' : 'Vérifier mon paiement'}
             </button>
             {pendingTx.checkoutUrl && (
               <a className="btn" href={pendingTx.checkoutUrl}>
-                Ouvrir la page de paiement SasPay
+                Ouvrir la page de paiement
               </a>
             )}
             {pendingTx.status === 'FAILED' && pendingTx.paymentId && (
@@ -1491,7 +1491,7 @@ export function Subscription() {
                     Activer {plan.name} gratuitement
                   </button>
                   <button type="button" className="lnk small-lnk" onClick={() => openCheckoutModal(plan.id)}>
-                    Voir le paiement SasPay (Mobile Money & Carte)
+                    Payer par Mobile Money ou Carte
                   </button>
                 </div>
               ) : (
@@ -1532,7 +1532,7 @@ export function Subscription() {
                     <td>Kora {inv.planName} ({inv.billing === 'year' ? 'an' : 'mois'})</td>
                     <td>{inv.provider}</td>
                     <td>{inv.amountXof.toLocaleString('fr-FR')} FCFA</td>
-                    <td><span className={inv.status === 'paid' ? 'pill-ok' : 'pill-spec'}>{inv.status === 'paid' ? 'Payée (SUCCESS)' : 'En attente'}</span></td>
+                    <td><span className={inv.status === 'paid' ? 'pill-ok' : 'pill-spec'}>{inv.status === 'paid' ? 'Payée' : 'En attente'}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -1541,17 +1541,17 @@ export function Subscription() {
         </section>
       )}
 
-      <Modal open={!!selected} onClose={() => setCheckoutPlan(null)} title={selected ? `Paiement SasPay · Kora ${selected.name}` : ''} maxWidth={560}>
+      <Modal open={!!selected} onClose={() => setCheckoutPlan(null)} title={selected ? `Paiement · Kora ${selected.name}` : ''} maxWidth={560}>
         {selected && (
           pendingTx && pendingTx.planId === selected.id ? (
             <div className="form">
               <div className="checkout-summary">
                 <div>
-                  <strong>Vérification du paiement SasPay</strong>
-                  <small className="mu">ID : {pendingTx.paymentId || pendingTx.sessionId}</small>
+                  <strong>Vérification du paiement</strong>
+                  <small className="mu">Référence : {pendingTx.paymentId || pendingTx.sessionId}</small>
                 </div>
                 <span className={pendingTx.status === 'FAILED' ? 'pill-accent' : 'pill-spec'}>
-                  {pendingTx.status}
+                  {pendingStatusLabel}
                 </span>
               </div>
 
@@ -1559,7 +1559,7 @@ export function Subscription() {
               {payErr && <p className="err-msg" role="alert">{payErr}</p>}
 
               {pendingTx.postOtpConfirm && pendingTx.paymentId && (
-                <label>Code OTP reçu par SMS (confirmation post-push)
+                <label>Code de confirmation reçu par SMS
                   <div style={{ display: 'flex', gap: 8 }}>
                     <input
                       className="field"
@@ -1569,7 +1569,7 @@ export function Subscription() {
                       onChange={e => setPostOtp(e.target.value)}
                     />
                     <button type="button" className="btn p" disabled={busy || !postOtp.trim()} onClick={handleConfirmPostOtp}>
-                      Confirmer OTP
+                      Confirmer le code
                     </button>
                   </div>
                 </label>
@@ -1578,11 +1578,11 @@ export function Subscription() {
               <div className="btns">
                 <button type="button" className="btn p" disabled={busy} onClick={handleVerifyNow}>
                   <Icon n="check" s={18} />
-                  {busy ? 'Vérification…' : 'Vérifier mon paiement maintenant'}
+                  {busy ? 'Vérification…' : 'Vérifier mon paiement'}
                 </button>
                 {pendingTx.checkoutUrl && (
                   <a className="btn" href={pendingTx.checkoutUrl}>
-                    Ouvrir la page SasPay
+                    Ouvrir la page de paiement
                   </a>
                 )}
                 {pendingTx.status === 'FAILED' && pendingTx.paymentId && (
@@ -1603,11 +1603,11 @@ export function Subscription() {
                   <small className="mu">{billing === 'year' ? 'Facturation annuelle (2 mois offerts)' : 'Facturation mensuelle · sans engagement'}</small>
                 </div>
                 <strong className="checkout-price">
-                  {(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')}.00 FCFA
+                  {(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')} FCFA
                 </strong>
               </div>
 
-              <div className="chips" role="radiogroup" aria-label="Mode de paiement SasPay">
+              <div className="chips" role="radiogroup" aria-label="Mode de paiement">
                 <button
                   type="button"
                   role="radio"
@@ -1615,7 +1615,7 @@ export function Subscription() {
                   className={'chip' + (flowMode === 'softpay' ? ' on' : '')}
                   onClick={() => { setFlowMode('softpay'); setPayErr('') }}
                 >
-                  Paiement direct (Softpay)
+                  Mobile Money / Carte direct
                 </button>
                 <button
                   type="button"
@@ -1624,7 +1624,7 @@ export function Subscription() {
                   className={'chip' + (flowMode === 'hosted' ? ' on' : '')}
                   onClick={() => { setFlowMode('hosted'); setPayErr('') }}
                 >
-                  Page hébergée SasPay
+                  Page de paiement sécurisée
                 </button>
               </div>
 
@@ -1673,13 +1673,13 @@ export function Subscription() {
 
               {needsPreOtp && (
                 <label>
-                  Code OTP pré-paiement ({activeNet?.label || networkCode})
+                  Code de validation ({activeNet?.label || networkCode})
                   <small className="mu">{otpHint || activeNet?.otpInstructions}</small>
                   <input
                     className="field"
                     required
                     inputMode="numeric"
-                    placeholder="Code OTP obtenu par USSD"
+                    placeholder="Code de confirmation"
                     value={preOtp}
                     onChange={e => setPreOtp(e.target.value)}
                   />
@@ -1692,7 +1692,7 @@ export function Subscription() {
               <p className="mu small-note">
                 {billingSimulation
                   ? 'Mode découverte actif : aucun débit ne sera effectué.'
-                  : 'Paiement sécurisé via SasPay. Si votre opérateur (Wave, Orange Money, Carte) renvoie une page de confirmation, vous y serez redirigé automatiquement. Votre abonnement est activé dès vérification du statut SUCCESS.'}
+                  : 'Paiement sécurisé. Votre abonnement est activé automatiquement dès confirmation par votre opérateur ou votre banque.'}
               </p>
 
               <div className="btns">
@@ -1700,8 +1700,8 @@ export function Subscription() {
                 <button type="submit" className="btn p" disabled={busy}>
                   <Icon n="card" s={18} />
                   {busy
-                    ? 'Initialisation SasPay…'
-                    : `Payer ${(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')}.00 FCFA`}
+                    ? 'Préparation du paiement…'
+                    : `Payer ${(billing === 'year' ? selected.priceYear : selected.priceMonth).toLocaleString('fr-FR')} FCFA`}
                 </button>
               </div>
             </form>

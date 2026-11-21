@@ -417,20 +417,18 @@ export function validateUploadMeta(bucket, fileName, mimeType, sizeBytes, { useR
 
   if (bucket === 'posters') {
     if (!ALLOWED_POSTER_EXT.has(ext)) return { ok: false, error: 'Format d’image non autorisé (JPG, PNG ou WebP uniquement).' }
-    if (mime && !ALLOWED_POSTER_MIME.has(mime)) return { ok: false, error: 'Type MIME d’image non autorisé.' }
-    if (size > 5 * 1024 * 1024) return { ok: false, error: 'Image supérieure à 5 Mo.' }
+    if (mime && !ALLOWED_POSTER_MIME.has(mime)) return { ok: false, error: 'Format d’image non pris en charge.' }
+    if (size > 5 * 1024 * 1024) return { ok: false, error: 'L’image dépasse la taille autorisée.' }
     return { ok: true, cleanName: clean }
   }
   if (bucket === 'videos') {
-    if (!ALLOWED_VIDEO_EXT.has(ext)) return { ok: false, error: 'Format vidéo non autorisé (MP4, WebM ou MOV uniquement).' }
-    if (mime && !ALLOWED_VIDEO_MIME.has(mime)) return { ok: false, error: 'Type MIME vidéo non autorisé.' }
+    if (!ALLOWED_VIDEO_EXT.has(ext)) return { ok: false, error: 'Format vidéo non pris en charge (MP4, WebM ou MOV uniquement).' }
+    if (mime && !ALLOWED_VIDEO_MIME.has(mime)) return { ok: false, error: 'Format vidéo non pris en charge.' }
     const maxBytes = useR2 ? 5 * 1024 * 1024 * 1024 : 50 * 1024 * 1024
     if (size > maxBytes) {
       return {
         ok: false,
-        error: useR2
-          ? 'Vidéo supérieure à 5 Go (limite maximale par fichier sur Cloudflare R2).'
-          : 'Vidéo supérieure à 50 Mo. Activez le stockage Cloudflare R2 pour téléverser des films jusqu’à 5 Go.'
+        error: 'Ce fichier vidéo dépasse la taille maximale autorisée.'
       }
     }
     return { ok: true, cleanName: clean }
