@@ -687,7 +687,133 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
               <p className="mu">{vid ? `Vidéo en ligne (${Math.round((vid.size_bytes || 0) / 1048576)} Mo).` : 'Aucune vidéo téléversée pour le moment.'}</p>
             </>
           )}
+          <div className="divider" />
+          <SubtitleManager titleId={+id} episodes={f.type === 'series' ? eps : []} />
         </>
+      )}
+    </div>
+  )
+}
+
+const SUB_LANGS: [string, string][] = [
+  ['fr', 'Français'], ['en', 'English'], ['bm', 'Bambara'], ['wo', 'Wolof'], ['ff', 'Peul'], ['ar', 'Arabe'], ['ja', 'Japonais']
+]
+
+function SubtitleManager({ titleId, episodes }: { titleId: number; episodes: any[] }) {
+  const { toast } = useApp()
+  const [epId, setEpId] = useState<string>(episodes[0] ? String(episodes[0].id) : '')
+  const [lang, setLang] = useState('fr')
+  const [offsetMs, setOffsetMs] = useState('0')
+  const [tracks, setTracks] = useState<any[]>([])
+  const [busy, setBusy] = useState(false)
+  const [status, setStatus] = useState('')
+
+  const targetEpId = episodes.length && epId ? Number(epId) : undefined
+
+  const load = async () => {
+    const qs = targetEpId ? `episodeId=${targetEpId}` : `titleId=${titleId}`
+    const r = await apiGet<{ tracks: any[] }>(`/api/subtitles?${qs}`)
+    if (r.ok) setTracks(r.data.tracks || [])
+  }
+
+  useEffect(() => {
+    if (episodes.length && !epId) setEpId(String(episodes[0].id))
+  }, [episodes.length])
+
+  useEffect(() => { load() }, [titleId, targetEpId])
+
+  const uploadSubFile = async (file: File | undefined) => {
+    if (!file) return
+    setBusy(true); setStatus('Conversion et synchronisation de la piste…')
+    const content = await file.text()
+    const label = SUB_LANGS.find(([c]) => c === lang)?.[1] || lang.toUpperCase()
+    const r = await apiPost<{ cues: number }>('/api/subtitles?action=save', {
+      titleId,
+      episodeId: targetEpId,
+      languageCode: lang,
+      languageLabel: label,
+      content,
+      offsetMs: Number(offsetMs) || 0,
+      source: 'upload'
+    })
+    setBusy(false)
+    if (!r.ok) { setStatus(r.data.error || 'Fichier sous-titre invalide.'); return }
+    setStatus(`Piste ${label} synchronisée (${r.data.cues} répliques).`)
+    toast(`Sous-titres ${label} enregistrés.`, 'ok')
+    load()
+  }
+
+  const generateAiSubs = async () => {
+    setBusy(true); setStatus('Analyse de la voix et génération des sous-titres synchronisés (IA)…')
+    const label = SUB_LANGS.find(([c]) => c === lang)?.[1] || 'Français'
+    const r = await apiPost<{ cues: number }>('/api/subtitles?action=generate', {
+      titleId,
+      episodeId: targetEpId,
+      languageCode: lang,
+      languageLabel: label
+    })
+    setBusy(false)
+    if (!r.ok) { setStatus(r.data.error || 'Synchronisation IA indisponible.'); return }
+    setStatus(`Sous-titres ${label} synchronisés à la voix par IA (${r.data.cues} répliques) !`)
+    toast(`Sous-titres ${label} générés et synchronisés !`, 'ok')
+    load()
+  }
+
+  const removeTrack = async (id: number) => {
+    const r = await apiPost('/api/subtitles?action=delete', { id })
+    if (r.ok) { toast('Piste supprimée.', 'info'); load() }
+  }
+
+  return (
+    <div className="form" style={{ maxWidth: 'none' }}>
+      <h3>Sous-titres synchronisés avec la voix (WebVTT / SRT / IA)</h3>
+      <p className="mu">Importez un fichier <code>.vtt</code> ou <code>.srt</code>, ou lancez la transcription vocale IA pour caler automatiquement les répliques sur le son de la vidéo.</p>
+
+      <div className="inline">
+        {episodes.length > 0 && (
+          <label>Épisode cible
+            <select value={epId} onChange={e => setEpId(e.target.value)}>
+              {episodes.map(e => <option key={e.id} value={e.id}>S{e.season}E{e.number} — {e.title}</option>)}
+            </select>
+          </label>
+        )}
+        <label>Langue
+          <select value={lang} onChange={e => setLang(e.target.value)}>
+            {SUB_LANGS.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
+          </select>
+        </label>
+        <label>Décalage voix (ms)
+          <input className="field narrow" inputMode="numeric" value={offsetMs} onChange={e => setOffsetMs(e.target.value)} placeholder="0" />
+        </label>
+      </div>
+
+      <div className="btns">
+        <label className="btn" style={{ cursor: 'pointer' }}>
+          <Icon n="upload" s={16} />
+          <span>Importer .vtt / .srt</span>
+          <input type="file" accept=".vtt,.srt,text/vtt,text/plain" disabled={busy} style={{ display: 'none' }} onChange={e => uploadSubFile(e.target.files?.[0])} />
+        </label>
+        <button type="button" className="btn p" disabled={busy} onClick={generateAiSubs}>
+          <Icon n="sparkles" s={16} />
+          {busy ? 'Synchronisation en cours…' : 'Synchroniser automatiquement depuis la voix (IA)'}
+        </button>
+      </div>
+
+      {status && <p className="status-box" role="status">{status}</p>}
+
+      {tracks.length > 0 ? (
+        <Table
+          head={['Langue', 'Source', 'Calage voix', 'Actions']}
+          rows={tracks.map(tr => [
+            tr.language_label,
+            tr.source === 'ai_gemini' ? 'IA Gemini (voix)' : tr.source === 'ai_whisper' ? 'IA Whisper (voix)' : 'Fichier .vtt/.srt',
+            `${tr.offset_ms >= 0 ? '+' : ''}${(tr.offset_ms / 1000).toFixed(2)} s`,
+            <button type="button" className="lnk" onClick={() => removeTrack(tr.id)}>Supprimer</button>
+          ])}
+          empty="Aucune piste."
+        />
+      ) : (
+        <p className="mu">Aucune piste de sous-titres enregistrée pour cette vidéo.</p>
       )}
     </div>
   )

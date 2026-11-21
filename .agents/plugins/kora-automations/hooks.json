@@ -54,5 +54,19 @@
         ]
       }
     ]
+  },
+  "validate-vtt-on-edit": {
+    "PostToolUse": [
+      {
+        "matcher": "edit_file|write_file",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ./hooks/validate-vtt-on-edit.mjs",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
   }
 }

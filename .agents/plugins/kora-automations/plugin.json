@@ -1,12 +1,12 @@
 {
   "name": "kora-automations",
   "displayName": "Kora Automations",
-  "version": "1.1.0",
-  "description": "Project-specific skills (CSP sync, Supabase migrations, catalog sync, Edge Functions), lifecycle hooks (file protection, TypeScript check, CSP parity, brand assets sync), review subagents (security, UI/brand, HLS playback, payments), and Playwright + Context7 MCP integrations for Kora.",
+  "version": "1.2.0",
+  "description": "Project-specific skills (video streaming pipeline, voice-subtitle sync, CSP sync, Supabase migrations, catalog sync, Edge Functions), lifecycle hooks (file protection, TypeScript check, CSP parity, brand assets sync, WebVTT validation), review subagents (security, UI/brand, HLS playback, subtitle sync, payments), and Playwright + Context7 MCP integrations for Kora.",
   "suggestedPrompts": [
-    "Draft a Supabase SQL migration with RLS policies for Kora",
-    "Sync CSP headers between server.js and vercel.json",
-    "Synchronize server/catalog.js with Supabase titles and episodes",
-    "Audit HLS player controls or payment flows"
+    "Optimize HLS adaptive streaming or FFmpeg encoding for Kora",
+    "Synchronize WebVTT/SRT subtitles with video voice and audio",
+    "Audit HLS playback quality and subtitle-audio sync",
+    "Draft a Supabase SQL migration with RLS policies for Kora"
   ]
 }

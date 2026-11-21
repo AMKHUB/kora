@@ -1,8 +1,23 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Hls from 'hls.js'
+import { apiPost } from './api'
 import { Episode, Item, useApp } from './store'
 import { Icon, Meta, Poster } from './ui'
-import { apiPost } from './api'
+
+type SubtitleTrack = {
+  id: number
+  language_code: string
+  language_label: string
+  vtt_content: string
+  offset_ms: number
+  source: string
+}
+
+type VttCue = {
+  start: number
+  end: number
+  text: string
+}
 
 const fmt = (s: number) => {
   const sec = Math.max(0, Math.floor(s))
@@ -12,28 +27,42 @@ const fmt = (s: number) => {
   return (h ? `${h}:${String(m).padStart(2, '0')}` : String(m)) + ':' + String(x).padStart(2, '0')
 }
 
-const DEMO_SUBS: Record<string, string[]> = {
-  Français: [
-    '« La parole du griot traverse les générations comme le fleuve traverse le Sahel. »',
-    '— Tu entends le vent du soir ? Il porte les nouvelles de Ségou.',
-    '— Tant que la kora résonne, la mémoire ne s’éteint jamais.',
-    '« Chaque histoire mérite d’être racontée à la lumière de son peuple. »',
-    '— Demain à l’aube, nous reprendrons la route vers la rive.'
-  ],
-  English: [
-    '“The griot’s voice crosses generations just as the river crosses the Sahel.”',
-    '— Do you hear the evening wind? It carries news from Ségou.',
-    '— As long as the kora plays, memory never fades.',
-    '“Every story deserves to be told in the light of its people.”',
-    '— Tomorrow at dawn, we set out again toward the riverbank.'
-  ],
-  Bambara: [
-    '« Jeli ka kuma bɛ taa ka tɛmɛ tile caman na i n’a fɔ baji. »',
-    '— I bɛ surɔ fɔɲɔ mɛn wa? A bɛ Sɛgu kibaruw lajɛ.',
-    '— Ni kora bɛ fɔ, hakili tɛ ban abada.',
-    '« Maana bɛɛ ka kan ka fɔ a ka jamana yeelen na. »',
-    '— Sini sɔgɔma, an bɛna taa baji da la.'
-  ]
+function parseTimestamp(ts: string): number {
+  const clean = ts.trim().replace(',', '.')
+  const parts = clean.split(':').map(Number)
+  if (parts.some(Number.isNaN)) return -1
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  return -1
+}
+
+function parseWebVtt(raw: string): VttCue[] {
+  if (!raw) return []
+  const lines = raw.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n')
+  const cues: VttCue[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i].trim()
+    if (line.includes('-->')) {
+      const [left, rightRaw] = line.split('-->')
+      const right = (rightRaw || '').trim().split(/\s+/)[0]
+      const start = parseTimestamp(left)
+      const end = parseTimestamp(right)
+      i++
+      const textLines: string[] = []
+      while (i < lines.length && lines[i].trim() !== '') {
+        textLines.push(lines[i].replace(/<[^>]+>/g, '').trim())
+        i++
+      }
+      const text = textLines.filter(Boolean).join('\n')
+      if (start >= 0 && end > start && text) {
+        cues.push({ start, end, text })
+      }
+    } else {
+      i++
+    }
+  }
+  return cues.sort((a, b) => a.start - b.start)
 }
 
 function getEpisodes(it: Item, season: number): Episode[] {
@@ -47,7 +76,7 @@ function getEpisodes(it: Item, season: number): Episode[] {
 }
 
 export function Player({ id, q }: { id: number; q: URLSearchParams }) {
-  const { byId, st, profile, progress, session, isPremium, toast } = useApp()
+  const { byId, st, profile, progress, session, role, isPremium, toast } = useApp()
   const it = byId(id)
   const trailer = q.has('t')
   const seasonNum = +(q.get('s') || 1)
@@ -57,12 +86,20 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
   const currentEp = epNum ? episodes.find(e => e.number === epNum) : undefined
 
   const initialDuration = trailer ? 95 : ((currentEp?.duration_min || it?.dur || 90) * 60)
-  const introEnd = currentEp?.intro_end_sec || 85
+  const introEnd = currentEp?.intro_end_sec ?? (it?.type === 'serie' ? 75 : 0)
 
   const [dur, setDur] = useState(0)
+  const [bufferedEnd, setBufferedEnd] = useState(0)
+  const [buffering, setBuffering] = useState(false)
+  const [videoReady, setVideoReady] = useState(false)
   const [src, setSrc] = useState('')
+  const [tracks, setTracks] = useState<SubtitleTrack[]>([])
+  const [activeTrackId, setActiveTrackId] = useState<number | 'off'>('off')
+  const [syncOffsetMs, setSyncOffsetMs] = useState(0)
+  const [voiceBoost, setVoiceBoost] = useState(false)
   const [streamErr, setStreamErr] = useState<{ code: number; msg: string } | null>(null)
   const [hlsLevels, setHlsLevels] = useState<string[]>([])
+  const [activeBitrate, setActiveBitrate] = useState('')
   const total = src && dur ? dur : initialDuration
 
   const savedPos = trailer
@@ -72,11 +109,11 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       : (profile.hist[id] || 0)
 
   const [t, setT] = useState(() => Math.min(savedPos, Math.max(0, initialDuration - 10)))
+  const [preciseTime, setPreciseTime] = useState(0)
   const [play, setPlay] = useState(true)
   const [ui, setUi] = useState(true)
   const [menu, setMenu] = useState(false)
   const [ad, setAd] = useState(isPremium || profile.kid || trailer ? 0 : 5)
-  const [sub, setSub] = useState(st.subLang)
   const [aud, setAud] = useState(st.audioLang)
   const [qual, setQual] = useState(st.defaultQuality || 'Auto')
   const [speed, setSpeed] = useState(1)
@@ -86,6 +123,9 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
   const vref = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const voiceFilterRef = useRef<BiquadFilterNode | null>(null)
+  const compRef = useRef<DynamicsCompressorNode | null>(null)
   const stage = useRef<HTMLDivElement>(null)
   const hide = useRef(0)
   const tRef = useRef(t)
@@ -93,13 +133,27 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
   const nextEp = it?.seasons && epNum ? episodes.find(e => e.number === epNum + 1) : undefined
 
-  // Demande d'URL signée auprès du serveur /api/play (vérification pays, dates, droits, formule)
+  const activeTrack = useMemo(
+    () => (activeTrackId === 'off' ? null : tracks.find(tr => tr.id === activeTrackId) || null),
+    [tracks, activeTrackId]
+  )
+
+  const parsedCues = useMemo(
+    () => (activeTrack ? parseWebVtt(activeTrack.vtt_content) : []),
+    [activeTrack?.id, activeTrack?.vtt_content]
+  )
+
+  // Demande d'URL signée + pistes de sous-titres synchronisées auprès du serveur /api/play
   useEffect(() => {
     if (!session || trailer || !it) return
     let off = false
     setStreamErr(null)
+    setVideoReady(false)
+    setTracks([])
+    setActiveTrackId('off')
+    setSyncOffsetMs(0)
     ;(async () => {
-      const res = await apiPost<{ url?: string; ads?: boolean }>('/api/play', {
+      const res = await apiPost<{ url?: string; ads?: boolean; subtitles?: SubtitleTrack[] }>('/api/play', {
         titleId: id,
         episodeId: currentEp?.id,
         seasonNum: epNum ? seasonNum : undefined,
@@ -109,6 +163,16 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       if (res.ok && res.data?.url) {
         setSrc(res.data.url)
         if (res.data.ads === false) setAd(0)
+        const loadedTracks = Array.isArray(res.data.subtitles) ? res.data.subtitles : []
+        setTracks(loadedTracks)
+        if (loadedTracks.length && st.subLang !== 'Désactivés') {
+          const preferred = loadedTracks.find(tr =>
+            tr.language_label.toLowerCase() === st.subLang.toLowerCase() ||
+            tr.language_code.toLowerCase() === st.subLang.slice(0, 2).toLowerCase()
+          ) || loadedTracks[0]
+          setActiveTrackId(preferred.id)
+          setSyncOffsetMs(preferred.offset_ms || 0)
+        }
       } else if (res.status === 402) {
         setStreamErr({ code: 402, msg: 'Ce contenu est réservé aux abonnés Kora Premium ou Famille.' })
       } else if (res.status === 403) {
@@ -118,30 +182,131 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
     return () => { off = true }
   }, [id, epNum, seasonNum, trailer, session?.user.id])
 
-  // Initialisation HLS.js ou flux MP4/WebM direct
+  // Initialisation HLS.js adaptatif (ABR optimisé 3G/4G/Fibre + reprise auto sur coupure) ou flux MP4/WebM
   useEffect(() => {
     const v = vref.current
     if (!v || !src) return
     hlsRef.current?.destroy()
     hlsRef.current = null
     setHlsLevels([])
+    setActiveBitrate('')
 
     const isHls = /\.m3u8(\?|$)/i.test(src)
     if (isHls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false })
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: false,
+        capLevelToPlayerSize: true,
+        startLevel: -1,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 90,
+        backBufferLength: 30,
+        abrEwmaDefaultEstimate: 1_500_000,
+        fragLoadingMaxRetry: 4,
+        manifestLoadingMaxRetry: 3
+      })
       hlsRef.current = hls
       hls.loadSource(src)
       hls.attachMedia(v)
+
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         const lvls = hls.levels.map(l => `${l.height}p`).reverse()
         setHlsLevels(['Auto', ...new Set(lvls)])
         if (play && ad === 0) v.play().catch(() => setPlay(false))
+      })
+      hls.on(Hls.Events.LEVEL_SWITCHED, (_ev, data) => {
+        const lvl = hls.levels[data.level]
+        if (lvl?.height) setActiveBitrate(`${lvl.height}p`)
+      })
+      hls.on(Hls.Events.ERROR, (_ev, data) => {
+        if (!data.fatal) return
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+          hls.startLoad()
+        } else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError()
+        } else {
+          hls.destroy()
+          setStreamErr({ code: 500, msg: 'Connexion interrompue pendant la lecture. Rechargez la page.' })
+        }
       })
       return () => { hls.destroy(); hlsRef.current = null }
     } else {
       v.src = src
     }
   }, [src])
+
+  // Synchronisation haute précision sous-titres ↔ voix (requestVideoFrameCallback = calé à l'image près)
+  useEffect(() => {
+    const v = vref.current as (HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (_now: number, meta: { mediaTime: number }) => void) => number
+      cancelVideoFrameCallback?: (id: number) => void
+    }) | null
+    if (!v || !src) return
+    let rafId = 0
+    let active = true
+
+    if (typeof v.requestVideoFrameCallback === 'function') {
+      const tick = (_now: number, meta: { mediaTime: number }) => {
+        if (!active) return
+        setPreciseTime(meta.mediaTime)
+        rafId = v.requestVideoFrameCallback!(tick)
+      }
+      rafId = v.requestVideoFrameCallback(tick)
+      return () => {
+        active = false
+        v.cancelVideoFrameCallback?.(rafId)
+      }
+    }
+
+    const onTime = () => setPreciseTime(v.currentTime)
+    v.addEventListener('timeupdate', onTime)
+    return () => v.removeEventListener('timeupdate', onTime)
+  }, [src])
+
+  // Amélioration audio "Voix claire" (Web Audio API : normalisation dynamique + clarté vocale)
+  useEffect(() => {
+    const v = vref.current
+    if (!v || !src) return
+    if (!voiceBoost) {
+      if (voiceFilterRef.current) voiceFilterRef.current.gain.value = 0
+      if (compRef.current) compRef.current.ratio.value = 1
+      return
+    }
+    try {
+      if (!audioCtxRef.current) {
+        const AudioCtor = window.AudioContext || (window as any).webkitAudioContext
+        const ctx = new AudioCtor()
+        const source = ctx.createMediaElementSource(v)
+        const voiceEq = ctx.createBiquadFilter()
+        voiceEq.type = 'peaking'
+        voiceEq.frequency.value = 2800
+        voiceEq.Q.value = 1.1
+        voiceEq.gain.value = 3.5
+
+        const comp = ctx.createDynamicsCompressor()
+        comp.threshold.value = -20
+        comp.knee.value = 18
+        comp.ratio.value = 4
+        comp.attack.value = 0.005
+        comp.release.value = 0.2
+
+        source.connect(voiceEq)
+        voiceEq.connect(comp)
+        comp.connect(ctx.destination)
+
+        audioCtxRef.current = ctx
+        voiceFilterRef.current = voiceEq
+        compRef.current = comp
+      } else {
+        if (audioCtxRef.current.state === 'suspended') audioCtxRef.current.resume().catch(() => {})
+        if (voiceFilterRef.current) voiceFilterRef.current.gain.value = 3.5
+        if (compRef.current) compRef.current.ratio.value = 4
+      }
+    } catch {
+      toast('Mode Voix claire non disponible sur ce flux.', 'info')
+      setVoiceBoost(false)
+    }
+  }, [voiceBoost, src])
 
   // Changement de qualité HLS
   useEffect(() => {
@@ -153,7 +318,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
     if (idx >= 0) hls.currentLevel = idx
   }, [qual])
 
-  // Minuterie pub + lecture aperçu cinéma lorsqu'aucun fichier vidéo n'est attaché
+  // Minuterie pub + mode aperçu uniquement quand aucun fichier vidéo n'existe
   useEffect(() => {
     const h = window.setInterval(() => {
       if (ad > 0) setAd(a => Math.max(0, a - 1))
@@ -172,8 +337,12 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
   useEffect(() => {
     const v = vref.current
     if (!v || !src) return
-    if (play && ad === 0) v.play().catch(() => setPlay(false))
-    else v.pause()
+    if (play && ad === 0) {
+      if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume().catch(() => {})
+      v.play().catch(() => setPlay(false))
+    } else {
+      v.pause()
+    }
   }, [play, ad, src])
 
   useEffect(() => { if (vref.current) vref.current.playbackRate = speed }, [speed, src])
@@ -217,8 +386,42 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
   const seek = (n: number) => {
     const c = Math.max(0, Math.min(total, n))
     setT(c)
+    setPreciseTime(c)
     if (vref.current && src) vref.current.currentTime = c
     setNextCountdown(null)
+    wake()
+  }
+
+  const adjustSync = (deltaMs: number) => {
+    setSyncOffsetMs(prev => {
+      const next = Math.max(-5000, Math.min(5000, prev + deltaMs))
+      toast(`Synchro sous-titres : ${(next / 1000 >= 0 ? '+' : '')}${(next / 1000).toFixed(1)} s`, 'info')
+      return next
+    })
+  }
+
+  const saveSyncOffset = async () => {
+    if (!activeTrack || activeTrack.id < 0) return
+    const r = await apiPost('/api/subtitles?action=offset', { id: activeTrack.id, offsetMs: syncOffsetMs })
+    if (r.ok) {
+      setTracks(list => list.map(tr => tr.id === activeTrack.id ? { ...tr, offset_ms: syncOffsetMs } : tr))
+      toast('Synchronisation enregistrée pour tous les spectateurs.', 'ok')
+    } else {
+      toast(r.data.error || 'Impossible d’enregistrer le décalage.', 'err')
+    }
+  }
+
+  const toggleSubtitles = () => {
+    if (!tracks.length) {
+      toast('Aucun sous-titre disponible pour cette vidéo (ajoutez-en dans Admin ou Studio).', 'info')
+      return
+    }
+    if (activeTrackId === 'off') {
+      setActiveTrackId(tracks[0].id)
+      setSyncOffsetMs(tracks[0].offset_ms || 0)
+    } else {
+      setActiveTrackId('off')
+    }
     wake()
   }
 
@@ -236,7 +439,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
     } catch { toast('Picture-in-Picture non pris en charge par ce navigateur.', 'info') }
   }
 
-  // Raccourcis clavier complets : Espace/K, Flèches, J/L, M, F, C, P, Échap
+  // Raccourcis clavier complets : Espace/K, Flèches, J/L, M, F, C, P, [ / ] (synchro ST), Échap
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!it || (e.target as HTMLElement).matches?.('input,select,textarea,button')) return
@@ -248,8 +451,10 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       else if (e.key === 'ArrowDown') { e.preventDefault(); setVol(v => Math.max(0, +(v - 0.1).toFixed(1))); wake() }
       else if (key === 'm') { setMuted(m => !m); wake() }
       else if (key === 'f') { fs() }
-      else if (key === 'c') { setSub(s => s === 'Désactivés' ? 'Français' : 'Désactivés'); wake() }
+      else if (key === 'c') { toggleSubtitles() }
       else if (key === 'p') { togglePip() }
+      else if (e.key === '[') { if (activeTrack) adjustSync(-100) }
+      else if (e.key === ']') { if (activeTrack) adjustSync(100) }
       else if (e.key === 'Escape') { setMenu(false) }
     }
     addEventListener('keydown', onKey)
@@ -258,23 +463,29 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
   if (!it) return <p className="page mu">Chargement du lecteur…</p>
 
-  const subLines = DEMO_SUBS[sub] || DEMO_SUBS.Français
-  const activeSubLine = subLines[Math.floor(t / 7) % subLines.length]
-  const qualityOptions = hlsLevels.length ? hlsLevels : ['Auto', '4K', '1080p', '720p', '480p', '360p']
+  // Calcul du sous-titre actif synchronisé à la milliseconde près avec la voix (preciseTime + offset)
+  const effectiveTime = (src ? preciseTime : t) + (syncOffsetMs / 1000)
+  const activeCueText = activeTrack
+    ? parsedCues.find(c => effectiveTime >= c.start && effectiveTime <= c.end)?.text || ''
+    : ''
+
+  const showSkipIntro = !trailer && introEnd > 5 && total > introEnd + 15 && t >= 5 && t < introEnd
+  const qualityOptions = hlsLevels.length ? hlsLevels : ['Auto', '1080p', '720p', '480p']
   const audioOptions = ['Original', ...it.langs, ...(it.audioDesc ? ['Audiodescription (FR)'] : [])]
-  const subOptions = ['Désactivés', ...(it.subtitles || ['Français', 'English'])]
   const subFontSize = st.subSize === 'grand' ? '1.35rem' : st.subSize === 'petit' ? '0.9rem' : '1.08rem'
+  const bufPct = total > 0 ? Math.min(100, Math.round((bufferedEnd / total) * 100)) : 0
 
   return (
     <div className="player">
       <div className="stage" ref={stage} onMouseMove={wake} onClick={e => { if (e.target === e.currentTarget) setPlay(p => !p); wake() }}>
-        <Poster item={it} wide />
+        {(!src || !videoReady) && <Poster item={it} wide />}
+
         {!src && !streamErr && ad === 0 && (
           <div className={'demo-reel' + (play ? ' playing' : '')} aria-hidden="true">
             <span className="reel-beam" />
             <div className="reel-badge">
               <span className="dot" />
-              <span>{trailer ? 'Bande-annonce' : 'Mode aperçu cinéma'} · {qual === 'Auto' ? (it.quality || 'HD') : qual}</span>
+              <span>{trailer ? 'Bande-annonce' : 'Aucune vidéo téléversée · Aperçu'}</span>
             </div>
           </div>
         )}
@@ -282,12 +493,35 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
         {src && (
           <video
             ref={vref}
+            crossOrigin="anonymous"
             playsInline
-            preload="metadata"
-            onLoadedMetadata={e => { setDur(e.currentTarget.duration); e.currentTarget.currentTime = t }}
+            preload="auto"
+            onLoadedMetadata={e => {
+              const d = e.currentTarget.duration
+              setDur(d)
+              const startAt = savedPos > 0 && savedPos < d - 5 ? savedPos : 0
+              e.currentTarget.currentTime = startAt
+              setT(startAt)
+              setPreciseTime(startAt)
+            }}
+            onLoadedData={() => { setVideoReady(true); setBuffering(false) }}
+            onWaiting={() => setBuffering(true)}
+            onStalled={() => setBuffering(true)}
+            onPlaying={() => setBuffering(false)}
+            onCanPlay={() => setBuffering(false)}
+            onProgress={e => {
+              const b = e.currentTarget.buffered
+              if (b.length > 0) setBufferedEnd(b.end(b.length - 1))
+            }}
             onTimeUpdate={e => setT(e.currentTarget.currentTime)}
             onEnded={() => setPlay(false)}
           />
+        )}
+
+        {buffering && src && !streamErr && ad === 0 && (
+          <div className="player-buffer" role="status" aria-label="Mise en mémoire tampon">
+            <span className="spinner" />
+          </div>
         )}
 
         {streamErr ? (
@@ -314,7 +548,14 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
                 <b>{trailer ? 'Bande-annonce · ' : ''}{it.title}</b>
                 {currentEp && <small>Saison {seasonNum} · Épisode {currentEp.number} — {currentEp.title}</small>}
               </div>
-              <button type="button" className="icon-btn" onClick={() => setSub(s => s === 'Désactivés' ? 'Français' : 'Désactivés')} aria-label="Activer ou couper les sous-titres" title="Sous-titres (C)">
+              {activeBitrate && <span className="pill-spec" style={{ fontSize: '0.72rem' }}>{activeBitrate}</span>}
+              <button
+                type="button"
+                className={'icon-btn' + (activeTrack ? ' active-ctl' : '')}
+                onClick={toggleSubtitles}
+                aria-label="Activer ou couper les sous-titres"
+                title={tracks.length ? 'Sous-titres (C)' : 'Aucun sous-titre disponible'}
+              >
                 <Icon n="captions" />
               </button>
               <button type="button" className="icon-btn" onClick={togglePip} aria-label="Picture-in-Picture" title="Picture-in-Picture (P)">
@@ -326,22 +567,59 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
             </div>
 
             {menu && (
-              <div className="menu" role="dialog" aria-label="Réglages vidéo et audio">
+              <div className="menu" role="dialog" aria-label="Réglages vidéo, audio et sous-titres">
                 <label>Qualité
                   <select value={qual} onChange={e => setQual(e.target.value)}>
                     {qualityOptions.map(x => <option key={x}>{x}</option>)}
                   </select>
                 </label>
-                <label>Sous-titres
-                  <select value={sub} onChange={e => setSub(e.target.value)}>
-                    {subOptions.map(x => <option key={x}>{x}</option>)}
+                <label>Sous-titres synchronisés
+                  <select
+                    value={String(activeTrackId)}
+                    onChange={e => {
+                      if (e.target.value === 'off') setActiveTrackId('off')
+                      else {
+                        const tid = Number(e.target.value)
+                        const tr = tracks.find(x => x.id === tid)
+                        setActiveTrackId(tid)
+                        setSyncOffsetMs(tr?.offset_ms || 0)
+                      }
+                    }}
+                  >
+                    <option value="off">Désactivés</option>
+                    {tracks.map(tr => (
+                      <option key={tr.id} value={tr.id}>
+                        {tr.language_label}{tr.source.startsWith('ai_') ? ' (IA)' : ''}
+                      </option>
+                    ))}
                   </select>
                 </label>
+
+                {activeTrack && (
+                  <div className="sync-row">
+                    <span>Synchro voix : <strong>{syncOffsetMs >= 0 ? '+' : ''}{(syncOffsetMs / 1000).toFixed(1)} s</strong></span>
+                    <div className="sync-btns">
+                      <button type="button" className="btn" onClick={() => adjustSync(-100)} title="Avancer les sous-titres ([)">−0.1 s</button>
+                      <button type="button" className="btn" onClick={() => setSyncOffsetMs(0)}>0</button>
+                      <button type="button" className="btn" onClick={() => adjustSync(100)} title="Retarder les sous-titres (])">+0.1 s</button>
+                    </div>
+                    {role === 'admin' && (
+                      <button type="button" className="lnk small-lnk" onClick={saveSyncOffset}>Enregistrer ce calage</button>
+                    )}
+                  </div>
+                )}
+
                 <label>Audio
                   <select value={aud} onChange={e => setAud(e.target.value)}>
                     {audioOptions.map(x => <option key={x}>{x}</option>)}
                   </select>
                 </label>
+
+                <label className="chk" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <input type="checkbox" checked={voiceBoost} onChange={e => setVoiceBoost(e.target.checked)} />
+                  <span>Voix claire (normalisation son)</span>
+                </label>
+
                 <label>Vitesse
                   <select value={speed} onChange={e => setSpeed(+e.target.value)}>
                     {[0.75, 1, 1.25, 1.5, 2].map(x => <option key={x} value={x}>{x}×</option>)}
@@ -360,7 +638,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
             <div>
               <div className="skips">
-                {!trailer && t >= 5 && t < introEnd && (
+                {showSkipIntro && (
                   <button type="button" className="btn" onClick={() => seek(introEnd)}>Ignorer l’introduction</button>
                 )}
                 {nextEp && (
@@ -372,14 +650,18 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
               <div className="bar">
                 <span>{fmt(t)}</span>
-                <input
-                  type="range"
-                  min={0}
-                  max={total}
-                  value={Math.min(t, total)}
-                  onChange={e => seek(+e.target.value)}
-                  aria-label="Position de lecture"
-                />
+                <div className="scrub-wrap">
+                  <div className="scrub-buf" style={{ width: `${bufPct}%` }} aria-hidden="true" />
+                  <input
+                    type="range"
+                    min={0}
+                    max={total}
+                    step={0.1}
+                    value={Math.min(t, total)}
+                    onChange={e => seek(+e.target.value)}
+                    aria-label="Position de lecture"
+                  />
+                </div>
                 <span>{fmt(total)}</span>
                 <div className="vol-box">
                   <button type="button" className="icon-btn" onClick={() => setMuted(m => !m)} aria-label={muted ? 'Activer le son' : 'Couper le son'}>
@@ -402,9 +684,9 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
           </div>
         )}
 
-        {sub !== 'Désactivés' && ad === 0 && !streamErr && (
-          <p className="sub" style={{ fontSize: subFontSize }}>
-            <span>{activeSubLine}</span>
+        {activeCueText && ad === 0 && !streamErr && (
+          <p className="sub" style={{ fontSize: subFontSize }} aria-live="polite">
+            <span>{activeCueText}</span>
           </p>
         )}
 
@@ -425,7 +707,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
           <div>
             <h1>{it.title}{currentEp ? ` — S${seasonNum} E${currentEp.number}` : ''}</h1>
             <p className="mu">
-              <Meta i={it} /> · Audio : {aud} · Sous-titres : {sub}
+              <Meta i={it} /> · Audio : {aud}{voiceBoost ? ' (Voix claire)' : ''} · Sous-titres : {activeTrack ? activeTrack.language_label : 'Désactivés'}
             </p>
             {t > 4 && !trailer && (
               <p className="mu small-note">Reprise automatique enregistrée à {fmt(t)} pour le profil {profile.name}.</p>
@@ -433,6 +715,9 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
           </div>
           <div className="btns">
             <a className="btn" href={`#/titre/${id}`}><Icon n="info" s={18} />Fiche complète</a>
+            {role === 'admin' && (
+              <a className="btn" href={`#/admin?t=titles&id=${id}`}><Icon n="captions" s={18} />Gérer les sous-titres</a>
+            )}
             <button
               type="button"
               className="btn"
@@ -444,7 +729,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
         </div>
 
         <p className="kbd-hint mu">
-          Raccourcis clavier : <kbd>Espace</kbd> lecture/pause · <kbd>←</kbd>/<kbd>→</kbd> ±10 s · <kbd>M</kbd> muet · <kbd>C</kbd> sous-titres · <kbd>F</kbd> plein écran
+          Raccourcis : <kbd>Espace</kbd> lecture/pause · <kbd>←</kbd>/<kbd>→</kbd> ±10 s · <kbd>M</kbd> muet · <kbd>C</kbd> sous-titres · <kbd>[</kbd>/<kbd>]</kbd> synchro voix ±0.1 s · <kbd>F</kbd> plein écran
         </p>
 
         {it.seasons && episodes.length > 0 && (

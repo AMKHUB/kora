@@ -39,12 +39,17 @@ export default async function handler(req, res) {
     })
     const data = await resp.json().catch(() => ({}))
     if (resp.ok && data?.url) {
-      return sendJson(res, 200, { url: data.url, ads: data.ads })
+      return sendJson(res, 200, {
+        url: data.url,
+        mime: data.mime || null,
+        ads: data.ads,
+        subtitles: Array.isArray(data.subtitles) ? data.subtitles : []
+      })
     }
     if (resp.status === 402 || resp.status === 403) {
       return sendJson(res, resp.status, { error: data?.error || 'Accès restreint.' })
     }
-  } catch { /* fallback ci-dessous si Edge Function indisponible */ }
+  } catch { /* fallback ci-dessous */ }
 
   return sendJson(res, 404, { error: 'Aucune source vidéo encodée pour ce titre.' })
 }

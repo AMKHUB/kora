@@ -772,6 +772,10 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
   const [backdropFile, setBackdropFile] = useState<File | null>(null)
   const [mainVideoFile, setMainVideoFile] = useState<File | null>(null)
   const [mainVideoPreview, setMainVideoPreview] = useState('')
+  const [subFile, setSubFile] = useState<File | null>(null)
+  const [subLang, setSubLang] = useState('fr')
+  const [aiSubBusy, setAiSubBusy] = useState(false)
+  const [aiSubMsg, setAiSubMsg] = useState('')
   const [dragOver, setDragOver] = useState<string | null>(null)
 
   const [episodes, setEpisodes] = useState<EpisodeDraft[]>(
@@ -920,6 +924,23 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
         mainVideoAsset
       })
       if (!saveRes.ok) throw new Error(saveRes.data.error || 'Erreur lors de la sauvegarde.')
+
+      // Si un fichier de sous-titres .vtt/.srt a été joint, on l'enregistre et le synchronise automatiquement
+      if (subFile && saveRes.data?.id) {
+        setStatusMsg('Synchronisation des sous-titres…'); setProgressPct(95)
+        const vttText = await subFile.text()
+        const label = LANGS.find(([c]) => c === subLang)?.[1] || 'Français'
+        const firstEpId = type === 'series' ? saveRes.data.episodes?.[0]?.dbId : undefined
+        await apiPost('/api/subtitles?action=save', {
+          titleId: saveRes.data.id,
+          episodeId: firstEpId,
+          languageCode: subLang,
+          languageLabel: label,
+          content: vttText,
+          offsetMs: 0,
+          source: 'upload'
+        })
+      }
 
       setProgressPct(100)
       setBusy(false)
@@ -1130,6 +1151,45 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
                     <video src={mainVideoPreview} controls playsInline />
                   </div>
                 )}
+
+                <div className="ep-studio-item">
+                  <div className="ep-studio-head">
+                    <strong>Sous-titres synchronisés avec la voix (.vtt / .srt / IA)</strong>
+                    <select value={subLang} onChange={e => setSubLang(e.target.value)} aria-label="Langue des sous-titres" style={{ minHeight: 36 }}>
+                      {LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
+                    </select>
+                  </div>
+                  <div className="btns flush">
+                    <label className="btn" style={{ cursor: 'pointer' }}>
+                      <Icon n="upload" s={16} />
+                      <span>{subFile ? `Fichier : ${subFile.name}` : 'Importer .vtt / .srt'}</span>
+                      <input type="file" accept=".vtt,.srt,text/vtt,text/plain" style={{ display: 'none' }} onChange={e => setSubFile(e.target.files?.[0] || null)} />
+                    </label>
+                    {initial?.id && (
+                      <button
+                        type="button"
+                        className="btn p"
+                        disabled={aiSubBusy}
+                        onClick={async () => {
+                          setAiSubBusy(true); setAiSubMsg('Analyse de la voix et génération des sous-titres…')
+                          const label = LANGS.find(([c]) => c === subLang)?.[1] || 'Français'
+                          const r = await apiPost<{ cues: number }>('/api/subtitles?action=generate', {
+                            titleId: initial.id,
+                            languageCode: subLang,
+                            languageLabel: label
+                          })
+                          setAiSubBusy(false)
+                          setAiSubMsg(r.ok ? `Sous-titres ${label} synchronisés (${r.data.cues} répliques) !` : (r.data.error || 'Erreur IA.'))
+                        }}
+                      >
+                        <Icon n="sparkles" s={16} />
+                        {aiSubBusy ? 'Synchronisation…' : 'Synchroniser depuis la voix (IA)'}
+                      </button>
+                    )}
+                  </div>
+                  {aiSubMsg && <p className="status-box" role="status">{aiSubMsg}</p>}
+                </div>
+
                 <div className="btns">
                   <button type="button" className="btn" onClick={() => setStep(2)}>← Retour</button>
                   <button type="button" className="btn p" onClick={() => setStep(4)}>Continuer vers Visibilité →</button>

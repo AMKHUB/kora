@@ -8,6 +8,7 @@ import checkoutHandler from './api/checkout.js'
 import authHandler from './api/auth.js'
 import meHandler from './api/me.js'
 import playHandler from './api/play.js'
+import subtitlesHandler from './api/subtitles.js'
 import studioHandler from './api/studio.js'
 import adminHandler from './api/admin.js'
 
@@ -57,6 +58,7 @@ app.get('/api/health', (_req, res) => {
 app.all('/api/auth', (req, res) => authHandler(req, res))
 app.all('/api/me', (req, res) => meHandler(req, res))
 app.post('/api/play', (req, res) => playHandler(req, res))
+app.all('/api/subtitles', (req, res) => subtitlesHandler(req, res))
 app.all('/api/studio', (req, res) => studioHandler(req, res))
 app.all('/api/admin', (req, res) => adminHandler(req, res))
 app.post('/api/checkout', (req, res) => checkoutHandler(req, res))
