@@ -5,6 +5,7 @@ import crypto from 'node:crypto'
 
 const DEFAULT_ACCOUNT_ID = '13542688dd607875e5a443ef3b10643e'
 const DEFAULT_BUCKET = 'kora-videos'
+const DEFAULT_WORKER_URL = 'https://kora-r2-gateway.kora-cinema.workers.dev'
 
 export function getR2Config() {
   const accountId = (process.env.R2_ACCOUNT_ID || DEFAULT_ACCOUNT_ID).trim()
@@ -12,13 +13,21 @@ export function getR2Config() {
   const secretAccessKey = (process.env.R2_SECRET_ACCESS_KEY || '').trim()
   const bucket = (process.env.R2_BUCKET_NAME || DEFAULT_BUCKET).trim()
   const publicBaseUrl = (process.env.R2_PUBLIC_BASE_URL || '').trim().replace(/\/$/, '')
+  const workerUrl = (process.env.R2_WORKER_URL || DEFAULT_WORKER_URL).trim().replace(/\/$/, '')
+  const workerSecret = (process.env.R2_WORKER_SECRET || '').trim()
+  const hasS3 = Boolean(accountId && accessKeyId && secretAccessKey && bucket)
+  const hasWorker = Boolean(workerUrl && workerSecret)
   return {
     accountId,
     accessKeyId,
     secretAccessKey,
     bucket,
     publicBaseUrl,
-    configured: Boolean(accountId && accessKeyId && secretAccessKey && bucket)
+    workerUrl,
+    workerSecret,
+    hasS3,
+    hasWorker,
+    configured: hasS3 || hasWorker
   }
 }
 
@@ -47,55 +56,72 @@ export function createR2PresignedUrl({ method = 'GET', objectKey, expiresInSec =
   if (!cfg.configured) return null
 
   const cleanKey = String(objectKey || '').replace(/^r2:/, '').replace(/^\/+/, '')
-  const host = `${cfg.accountId}.r2.cloudflarestorage.com`
-  const region = 'auto'
-  const service = 's3'
+  const upperMethod = method.toUpperCase() === 'PUT' ? 'PUT' : 'GET'
+  const ttl = Math.min(86400, Math.max(60, expiresInSec))
 
-  const now = new Date()
-  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
-  const dateStamp = amzDate.slice(0, 8)
-  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
-  const canonicalUri = `/${encodeRfc3986(cfg.bucket)}/${encodeS3Path(cleanKey)}`
+  // Si les clés S3 V4 sont présentes, on signe directement sur <account>.r2.cloudflarestorage.com
+  if (cfg.hasS3) {
+    const host = `${cfg.accountId}.r2.cloudflarestorage.com`
+    const region = 'auto'
+    const service = 's3'
 
-  const queryParams = [
-    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
-    ['X-Amz-Credential', `${cfg.accessKeyId}/${credentialScope}`],
-    ['X-Amz-Date', amzDate],
-    ['X-Amz-Expires', String(Math.min(86400, Math.max(60, expiresInSec)))],
-    ['X-Amz-SignedHeaders', 'host']
-  ]
-  const canonicalQuery = queryParams
-    .map(([k, v]) => `${encodeRfc3986(k)}=${encodeRfc3986(v)}`)
-    .sort()
-    .join('&')
+    const now = new Date()
+    const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+    const dateStamp = amzDate.slice(0, 8)
+    const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+    const canonicalUri = `/${encodeRfc3986(cfg.bucket)}/${encodeS3Path(cleanKey)}`
 
-  const canonicalHeaders = `host:${host}\n`
-  const signedHeaders = 'host'
-  const payloadHash = 'UNSIGNED-PAYLOAD'
+    const queryParams = [
+      ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+      ['X-Amz-Credential', `${cfg.accessKeyId}/${credentialScope}`],
+      ['X-Amz-Date', amzDate],
+      ['X-Amz-Expires', String(ttl)],
+      ['X-Amz-SignedHeaders', 'host']
+    ]
+    const canonicalQuery = queryParams
+      .map(([k, v]) => `${encodeRfc3986(k)}=${encodeRfc3986(v)}`)
+      .sort()
+      .join('&')
 
-  const canonicalRequest = [
-    method.toUpperCase(),
-    canonicalUri,
-    canonicalQuery,
-    canonicalHeaders,
-    signedHeaders,
-    payloadHash
-  ].join('\n')
+    const canonicalHeaders = `host:${host}\n`
+    const signedHeaders = 'host'
+    const payloadHash = 'UNSIGNED-PAYLOAD'
 
-  const stringToSign = [
-    'AWS4-HMAC-SHA256',
-    amzDate,
-    credentialScope,
-    sha256Hex(canonicalRequest)
-  ].join('\n')
+    const canonicalRequest = [
+      upperMethod,
+      canonicalUri,
+      canonicalQuery,
+      canonicalHeaders,
+      signedHeaders,
+      payloadHash
+    ].join('\n')
 
-  const kDate = hmac(`AWS4${cfg.secretAccessKey}`, dateStamp)
-  const kRegion = hmac(kDate, region)
-  const kService = hmac(kRegion, service)
-  const kSigning = hmac(kService, 'aws4_request')
-  const signature = crypto.createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex')
+    const stringToSign = [
+      'AWS4-HMAC-SHA256',
+      amzDate,
+      credentialScope,
+      sha256Hex(canonicalRequest)
+    ].join('\n')
 
-  return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`
+    const kDate = hmac(`AWS4${cfg.secretAccessKey}`, dateStamp)
+    const kRegion = hmac(kDate, region)
+    const kService = hmac(kRegion, service)
+    const kSigning = hmac(kService, 'aws4_request')
+    const signature = crypto.createHmac('sha256', kSigning).update(stringToSign, 'utf8').digest('hex')
+
+    return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`
+  }
+
+  // Passerelle Cloudflare Worker native connectée au compartiment R2 kora-videos (HMAC-SHA256)
+  if (cfg.hasWorker) {
+    const exp = Math.floor(Date.now() / 1000) + ttl
+    const sig = crypto.createHmac('sha256', cfg.workerSecret)
+      .update(`${upperMethod}:${cleanKey}:${exp}`, 'utf8')
+      .digest('hex')
+    return `${cfg.workerUrl}/${encodeS3Path(cleanKey)}?exp=${exp}&m=${upperMethod}&sig=${sig}`
+  }
+
+  return null
 }
 
 export function createR2UploadUrl(objectKey, expiresInSec = 7200) {

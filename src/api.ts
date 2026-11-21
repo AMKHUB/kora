@@ -61,7 +61,7 @@ export async function apiPost<T = any>(path: string, body: Record<string, unknow
 
 export async function uploadFileToSignedUrl(signedUrl: string, file: File): Promise<{ ok: boolean; error?: string }> {
   try {
-    const isR2 = signedUrl.includes('r2.cloudflarestorage.com') || signedUrl.includes('X-Amz-Signature=')
+    const isR2 = signedUrl.includes('r2.cloudflarestorage.com') || signedUrl.includes('X-Amz-Signature=') || signedUrl.includes('.workers.dev/')
     let res: Response
     if (isR2) {
       res = await fetch(signedUrl, {
