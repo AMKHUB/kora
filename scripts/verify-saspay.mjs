@@ -1,8 +1,8 @@
 import crypto from 'node:crypto'
 import {
+  ensureSaspayConfig,
   formatSaspayAmount,
   getMyRates,
-  getSaspayConfig,
   listCountries,
   resolveSaspayNetwork,
   verifySaspayWebhook
@@ -76,7 +76,7 @@ async function main() {
   console.log(`[OK] GET /countries/ en direct : ${countriesRes.data.length} pays reçus depuis https://api.saspay.me/api/v1/countries/`)
 
   // 5. Test de GET /pricing/my-rates/ si SASPAY_API_KEY est configurée
-  const cfg = getSaspayConfig()
+  const cfg = await ensureSaspayConfig()
   if (cfg.configured) {
     const ratesRes = await getMyRates()
     if (ratesRes.ok && Array.isArray(ratesRes.data)) {

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto'
+import { createAnonClient } from './supabaseServer.js'
 
 // Intégration officielle SasPay (https://api.saspay.me/api/v1) conforme à /llms.txt et /api-reference/openapi.json.
 // Toutes les requêtes sont exécutées exclusivement côté serveur. La clé API n'est jamais exposée ni journalisée.
@@ -6,6 +7,30 @@ import crypto from 'node:crypto'
 export const SASPAY_BASE_URL = 'https://api.saspay.me/api/v1'
 export const SASPAY_BFF_GATE = 'kora_saspay_bff_gate_7e6d5c4b3a2f1e0d9c8b7a6f5e4d3c2b1a0f9e8d'
 const WEBHOOK_TOLERANCE_SECONDS = 300
+
+let vaultCache = null
+let vaultCacheAt = 0
+
+export async function ensureSaspayConfig() {
+  const envKey = (process.env.SASPAY_API_KEY || '').trim()
+  const envWh = (process.env.SASPAY_WEBHOOK_SECRET || '').trim()
+  if (envKey && envWh) return getSaspayConfig()
+
+  const now = Date.now()
+  if (!vaultCache || now - vaultCacheAt > 60_000) {
+    try {
+      const anon = createAnonClient()
+      if (anon) {
+        const { data } = await anon.rpc('saspay_get_server_config', { p_gate_secret: SASPAY_BFF_GATE })
+        if (data && typeof data === 'object') {
+          vaultCache = data
+          vaultCacheAt = now
+        }
+      }
+    } catch { /* fallback env */ }
+  }
+  return getSaspayConfig()
+}
 
 // Catalogue officiel des événements webhook SasPay (/api-reference/webhooks)
 export const SASPAY_WEBHOOK_EVENTS = new Set([
@@ -134,9 +159,9 @@ const VALID_NETWORK_CODES = new Set([
 ])
 
 export function getSaspayConfig() {
-  const apiKey = (process.env.SASPAY_API_KEY || '').trim()
-  const webhookSecret = (process.env.SASPAY_WEBHOOK_SECRET || '').trim()
-  const appUrl = (process.env.APP_URL || process.env.SITE_URL || '').trim().replace(/\/$/, '')
+  const apiKey = (process.env.SASPAY_API_KEY || vaultCache?.api_key || '').trim()
+  const webhookSecret = (process.env.SASPAY_WEBHOOK_SECRET || vaultCache?.webhook_secret || '').trim()
+  const appUrl = (process.env.APP_URL || process.env.SITE_URL || vaultCache?.app_url || '').trim().replace(/\/$/, '')
   const isTestKey = apiKey.startsWith('sk_test_')
   const isLiveKey = apiKey.startsWith('sk_live_')
   return {
@@ -318,7 +343,7 @@ export async function saspayRequest({
   idempotencyKey,
   requireAuth = true
 }) {
-  const cfg = getSaspayConfig()
+  const cfg = await ensureSaspayConfig()
   if (requireAuth && !cfg.configured) {
     return {
       ok: false,
@@ -682,7 +707,7 @@ export async function getMyRates() {
    VÉRIFICATION CRYPTOGRAPHIQUE DES WEBHOOKS SASPAY
    ============================================================================ */
 export function verifySaspayWebhook({ rawBody, signatureHeader, timestampHeader, secret }) {
-  const signingSecret = String(secret || process.env.SASPAY_WEBHOOK_SECRET || '').trim()
+  const signingSecret = String(secret || process.env.SASPAY_WEBHOOK_SECRET || vaultCache?.webhook_secret || '').trim()
   if (!signingSecret) {
     return { valid: false, reason: 'SASPAY_WEBHOOK_SECRET non configuré.' }
   }

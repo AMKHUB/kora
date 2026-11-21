@@ -15,6 +15,7 @@ import {
   confirmPaymentOtp,
   createCheckoutSession,
   createWalletTransfer,
+  ensureSaspayConfig,
   formatSaspayAmount,
   getCheckoutSessionStatus,
   getMyRates,
@@ -49,6 +50,7 @@ const PLAN_PRICES_XOF = {
 }
 
 export default async function handler(req, res) {
+  await ensureSaspayConfig()
   const q = getQuery(req)
   const action = q.get('action') || ''
   const hasWebhookSig = Boolean(req.headers?.['x-webhook-signature'] || req.headers?.['x-webhook-timestamp'])
