@@ -253,11 +253,13 @@ export default async function handler(req, res) {
       return sendJson(res, 404, { error: 'Aucune vidéo prête trouvée pour ce contenu. Téléversez d’abord la vidéo.' })
     }
 
-    // Protection SSRF : l'URL téléchargée doit impérativement pointer vers notre stockage vidéo Supabase
+    // Protection SSRF : l'URL téléchargée doit impérativement pointer vers notre stockage vidéo Supabase ou Cloudflare R2
     try {
       const targetUrl = new URL(playData.url)
       const sbOrigin = new URL(cfg.url).origin
-      if (targetUrl.origin !== sbOrigin || !targetUrl.pathname.startsWith('/storage/v1/object/sign/videos/')) {
+      const isSbVideo = targetUrl.origin === sbOrigin && targetUrl.pathname.startsWith('/storage/v1/object/sign/videos/')
+      const isR2Video = targetUrl.protocol === 'https:' && targetUrl.hostname.endsWith('.r2.cloudflarestorage.com') && targetUrl.pathname.startsWith('/kora-videos/')
+      if (!isSbVideo && !isR2Video) {
         return sendJson(res, 400, { error: 'Source vidéo non prise en charge pour la transcription directe.' })
       }
     } catch {

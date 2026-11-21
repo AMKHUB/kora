@@ -4,6 +4,7 @@ import {
   getPlatformSettings,
   getQuery,
   getSessionContext,
+  getSupabaseConfig,
   isSafeMediaUrl,
   isSafeStoragePath,
   readJsonBody,
@@ -61,15 +62,16 @@ export default async function handler(req, res) {
       ])
       if (stats.error) return safeError(res, 400, 'Impossible de charger les statistiques.', stats.error)
       const r2 = getR2Config()
+      const r2Active = r2.configured || Boolean(ps?.r2Enabled)
       return sendJson(res, 200, {
         stats: stats.data,
         logs: logs.data || [],
         platformSettings: ps,
         r2Status: {
-          configured: r2.configured,
+          configured: r2Active,
           accountId: r2.accountId,
           bucket: r2.bucket,
-          maxVideoMb: r2.configured ? 5120 : 50
+          maxVideoMb: r2Active ? 5120 : 50
         }
       })
     }
@@ -218,7 +220,8 @@ export default async function handler(req, res) {
 
   if (action === 'sign-upload') {
     const bucket = body.bucket === 'videos' ? 'videos' : 'posters'
-    const useR2 = bucket === 'videos' && isR2Configured()
+    const ps = bucket === 'videos' && !isR2Configured() ? await getPlatformSettings() : null
+    const useR2 = bucket === 'videos' && (isR2Configured() || Boolean(ps?.r2Enabled))
     const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes, { useR2 })
     if (!meta.ok) return sendJson(res, 400, { error: meta.error })
 
@@ -228,9 +231,27 @@ export default async function handler(req, res) {
     const path = `${folder}/${kind}-${Date.now()}-${meta.cleanName}`
 
     if (useR2) {
-      const r2 = createR2UploadUrl(path, 3600)
-      if (!r2?.signedUrl) return sendJson(res, 500, { error: 'Impossible de préparer le téléversement Cloudflare R2.' })
-      return sendJson(res, 200, { signedUrl: r2.signedUrl, path: r2.storagePath, publicUrl: null, provider: 'r2' })
+      if (isR2Configured()) {
+        const r2 = createR2UploadUrl(path, 7200)
+        if (r2?.signedUrl) {
+          return sendJson(res, 200, { signedUrl: r2.signedUrl, path: r2.storagePath, publicUrl: null, provider: 'r2' })
+        }
+      }
+      const cfg = getSupabaseConfig()
+      const efResp = await fetch(`${cfg.url}/functions/v1/play`, {
+        method: 'POST',
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${ctx.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'sign-r2-upload', objectKey: path })
+      })
+      const efData = await efResp.json().catch(() => ({}))
+      if (efResp.ok && efData?.signedUrl) {
+        return sendJson(res, 200, { signedUrl: efData.signedUrl, path: efData.storagePath, publicUrl: null, provider: 'r2' })
+      }
+      return sendJson(res, 500, { error: efData?.error || 'Impossible de préparer le téléversement Cloudflare R2.' })
     }
 
     const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path)

@@ -23,21 +23,23 @@ export async function getPlatformSettings() {
   if (anon) {
     const { data, error } = await anon
       .from('platform_settings')
-      .select('billing_simulation,maintenance_mode,maintenance_message')
+      .select('billing_simulation,maintenance_mode,maintenance_message,r2_enabled')
       .eq('id', 1)
       .maybeSingle()
     if (!error && data) {
       return {
         billingSimulation: Boolean(data.billing_simulation),
         maintenanceMode: Boolean(data.maintenance_mode),
-        maintenanceMessage: String(data.maintenance_message || DEFAULT_MAINTENANCE_MSG)
+        maintenanceMessage: String(data.maintenance_message || DEFAULT_MAINTENANCE_MSG),
+        r2Enabled: Boolean(data.r2_enabled)
       }
     }
   }
   return {
     billingSimulation: isBillingSimulation(),
     maintenanceMode: false,
-    maintenanceMessage: DEFAULT_MAINTENANCE_MSG
+    maintenanceMessage: DEFAULT_MAINTENANCE_MSG,
+    r2Enabled: false
   }
 }
 

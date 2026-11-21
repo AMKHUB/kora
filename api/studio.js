@@ -1,8 +1,10 @@
 import {
   assertCsrf,
   enforceRateLimit,
+  getPlatformSettings,
   getQuery,
   getSessionContext,
+  getSupabaseConfig,
   isSafeMediaUrl,
   isSafeStoragePath,
   readJsonBody,
@@ -23,12 +25,13 @@ export default async function handler(req, res) {
   const action = getQuery(req).get('action') || ''
 
   if (req.method === 'GET' && action === 'data') {
-    const [ch, ti] = await Promise.all([
+    const [ch, ti, ps] = await Promise.all([
       db.from('creator_channels').select('channel_name,bio,country').eq('account_id', uid).maybeSingle(),
       db.from('titles')
         .select('id,title,type,year,country,original_language,age_rating,duration_min,synopsis_short,synopsis_long,status,poster_url,backdrop_url,created_at,title_genres(genres(name)),title_people(role,position,people(name)),seasons(number,episodes(id,number,title,synopsis,duration_min,intro_end_sec,video_assets(id)))')
         .eq('creator_id', uid)
-        .order('id', { ascending: false })
+        .order('id', { ascending: false }),
+      getPlatformSettings()
     ])
     const titles = (ti.data || []).map(t => ({
       id: t.id,
@@ -64,11 +67,12 @@ export default async function handler(req, res) {
       access_tier: 'free',
       created_at: t.created_at
     }))
+    const r2Active = isR2Configured() || Boolean(ps?.r2Enabled)
     return sendJson(res, 200, {
       channel: ch.data ? { channel_name: ch.data.channel_name, bio: ch.data.bio || '', country: ch.data.country || 'Mali' } : null,
       titles,
-      r2Enabled: isR2Configured(),
-      maxVideoMb: isR2Configured() ? 5120 : 50
+      r2Enabled: r2Active,
+      maxVideoMb: r2Active ? 5120 : 50
     })
   }
 
@@ -94,7 +98,8 @@ export default async function handler(req, res) {
   if (action === 'sign-upload') {
     if (!enforceRateLimit(req, res, 'studio_upload', 30, 15 * 60_000, uid)) return
     const bucket = body.bucket === 'videos' ? 'videos' : 'posters'
-    const useR2 = bucket === 'videos' && isR2Configured()
+    const ps = bucket === 'videos' && !isR2Configured() ? await getPlatformSettings() : null
+    const useR2 = bucket === 'videos' && (isR2Configured() || Boolean(ps?.r2Enabled))
     const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes, { useR2 })
     if (!meta.ok) return sendJson(res, 400, { error: meta.error })
 
@@ -102,9 +107,27 @@ export default async function handler(req, res) {
     const path = `creator/${uid}/${prefix}-${Date.now()}-${meta.cleanName}`
 
     if (useR2) {
-      const r2 = createR2UploadUrl(path, 3600)
-      if (!r2?.signedUrl) return sendJson(res, 500, { error: 'Impossible de préparer le téléversement Cloudflare R2.' })
-      return sendJson(res, 200, { signedUrl: r2.signedUrl, path: r2.storagePath, publicUrl: null, provider: 'r2' })
+      if (isR2Configured()) {
+        const r2 = createR2UploadUrl(path, 7200)
+        if (r2?.signedUrl) {
+          return sendJson(res, 200, { signedUrl: r2.signedUrl, path: r2.storagePath, publicUrl: null, provider: 'r2' })
+        }
+      }
+      const cfg = getSupabaseConfig()
+      const efResp = await fetch(`${cfg.url}/functions/v1/play`, {
+        method: 'POST',
+        headers: {
+          apikey: cfg.key,
+          Authorization: `Bearer ${ctx.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ action: 'sign-r2-upload', objectKey: path })
+      })
+      const efData = await efResp.json().catch(() => ({}))
+      if (efResp.ok && efData?.signedUrl) {
+        return sendJson(res, 200, { signedUrl: efData.signedUrl, path: efData.storagePath, publicUrl: null, provider: 'r2' })
+      }
+      return sendJson(res, 500, { error: efData?.error || 'Impossible de préparer le téléversement Cloudflare R2.' })
     }
 
     const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path)

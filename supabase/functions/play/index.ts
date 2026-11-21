@@ -20,6 +20,82 @@ const ISO_TO_COUNTRY: Record<string, string> = {
   BE: 'Belgique', CA: 'Canada', US: 'États-Unis'
 }
 
+const enc = new TextEncoder()
+
+function toHex(buf: ArrayBuffer): string {
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function sha256Hex(text: string): Promise<string> {
+  return toHex(await crypto.subtle.digest('SHA-256', enc.encode(text)))
+}
+
+async function hmacRaw(key: ArrayBuffer | Uint8Array, data: string): Promise<ArrayBuffer> {
+  const k = await crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+  return crypto.subtle.sign('HMAC', k, enc.encode(data))
+}
+
+function encodeRfc3986(str: string): string {
+  return encodeURIComponent(str).replace(/[!'()*]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+}
+
+function encodeS3Path(pathStr: string): string {
+  return String(pathStr).split('/').map(encodeRfc3986).join('/')
+}
+
+async function signR2S3Url(
+  cfg: { account_id: string; bucket_name: string; access_key_id: string; secret_access_key: string },
+  method: 'GET' | 'PUT',
+  objectKey: string,
+  expiresInSec = 7200
+): Promise<string> {
+  const cleanKey = String(objectKey || '').replace(/^r2:/, '').replace(/^\/+/, '')
+  const host = `${cfg.account_id}.r2.cloudflarestorage.com`
+  const region = 'auto'
+  const service = 's3'
+  const now = new Date()
+  const amzDate = now.toISOString().replace(/[:-]|\.\d{3}/g, '')
+  const dateStamp = amzDate.slice(0, 8)
+  const credentialScope = `${dateStamp}/${region}/${service}/aws4_request`
+  const canonicalUri = `/${encodeRfc3986(cfg.bucket_name)}/${encodeS3Path(cleanKey)}`
+
+  const queryParams = [
+    ['X-Amz-Algorithm', 'AWS4-HMAC-SHA256'],
+    ['X-Amz-Credential', `${cfg.access_key_id}/${credentialScope}`],
+    ['X-Amz-Date', amzDate],
+    ['X-Amz-Expires', String(Math.min(86400, Math.max(60, expiresInSec)))],
+    ['X-Amz-SignedHeaders', 'host']
+  ]
+  const canonicalQuery = queryParams
+    .map(([k, v]) => `${encodeRfc3986(k)}=${encodeRfc3986(v)}`)
+    .sort()
+    .join('&')
+
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    canonicalQuery,
+    `host:${host}\n`,
+    'host',
+    'UNSIGNED-PAYLOAD'
+  ].join('\n')
+
+  const stringToSign = [
+    'AWS4-HMAC-SHA256',
+    amzDate,
+    credentialScope,
+    await sha256Hex(canonicalRequest)
+  ].join('\n')
+
+  const kDate = await hmacRaw(enc.encode(`AWS4${cfg.secret_access_key}`), dateStamp)
+  const kRegion = await hmacRaw(kDate, region)
+  const kService = await hmacRaw(kRegion, service)
+  const kSigning = await hmacRaw(kService, 'aws4_request')
+  const signature = toHex(await hmacRaw(kSigning, stringToSign))
+
+  return `https://${host}${canonicalUri}?${canonicalQuery}&X-Amz-Signature=${signature}`
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   if (req.method !== 'POST') return json({ error: 'Méthode non autorisée' }, 405)
@@ -31,6 +107,30 @@ Deno.serve(async (req) => {
   if (!user) return json({ error: 'Connexion requise' }, 401)
 
   const body = await req.json().catch(() => ({}))
+  const { data: acc } = await db.from('accounts').select('country,role').eq('id', user.id).maybeSingle()
+
+  if (body.action === 'sign-r2-upload') {
+    const cleanKey = String(body.objectKey || '').replace(/^r2:/, '').replace(/^\/+/, '').trim()
+    if (!cleanKey || cleanKey.includes('..') || cleanKey.includes('\\')) {
+      return json({ error: 'Chemin de stockage invalide' }, 400)
+    }
+    const isAdmin = acc?.role === 'admin'
+    const ownerRe = new RegExp(`^creator/${user.id}/[A-Za-z0-9._-]+$`)
+    const adminRe = /^[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+$/
+    if (!isAdmin && !ownerRe.test(cleanKey)) {
+      return json({ error: 'Chemin créateur non autorisé' }, 403)
+    }
+    if (isAdmin && !adminRe.test(cleanKey)) {
+      return json({ error: 'Chemin administrateur non autorisé' }, 400)
+    }
+    const { data: r2Cfg } = await db.from('private_r2_config').select('account_id,bucket_name,access_key_id,secret_access_key').eq('id', 1).maybeSingle()
+    if (!r2Cfg?.access_key_id || !r2Cfg?.secret_access_key) {
+      return json({ error: 'Cloudflare R2 non configuré' }, 503)
+    }
+    const signedUrl = await signR2S3Url(r2Cfg, 'PUT', cleanKey, 7200)
+    return json({ signedUrl, storagePath: `r2:${cleanKey}`, provider: 'r2' })
+  }
+
   const titleId = Number(body.titleId)
   const episodeId = body.episodeId ? Number(body.episodeId) : null
   if (!Number.isInteger(titleId) || titleId <= 0) return json({ error: 'Requête invalide' }, 400)
@@ -47,7 +147,6 @@ Deno.serve(async (req) => {
   }
 
   const { data: t } = await db.from('titles').select('id,status,creator_id,available_from,available_until').eq('id', titleId).maybeSingle()
-  const { data: acc } = await db.from('accounts').select('country,role').eq('id', user.id).maybeSingle()
   const isPrivileged = acc?.role === 'admin' || (t?.creator_id && t.creator_id === user.id)
   const today = new Date().toISOString().slice(0, 10)
   if (!t || (!isPrivileged && (t.status !== 'published' || (t.available_from && t.available_from > today) || (t.available_until && t.available_until < today))))
@@ -93,6 +192,10 @@ Deno.serve(async (req) => {
     url = asset.hls_url
   } else if (asset?.storage_path && asset.storage_path.startsWith('r2:') && !asset.storage_path.includes('..')) {
     r2Path = asset.storage_path
+    const { data: r2Cfg } = await db.from('private_r2_config').select('account_id,bucket_name,access_key_id,secret_access_key').eq('id', 1).maybeSingle()
+    if (r2Cfg?.access_key_id && r2Cfg?.secret_access_key) {
+      url = await signR2S3Url(r2Cfg, 'GET', asset.storage_path, 7200)
+    }
   } else if (asset?.storage_path && !asset.storage_path.includes('..') && !asset.storage_path.startsWith('/')) {
     const { data: signed } = await db.storage.from('videos').createSignedUrl(asset.storage_path, 3600)
     if (signed?.signedUrl) url = signed.signedUrl
