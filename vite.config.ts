@@ -3,8 +3,12 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = path.dirname(fileURLToPath(import.meta.url))
-const site = process.env.SITE_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL : '')
-const pl = process.env.PLAUSIBLE_DOMAIN
+const escAttr = (s: string) => s.replace(/[&"'<>]/g, c => ({ '&': '&amp;', '"': '&quot;', "'": '&#39;', '<': '&lt;', '>': '&gt;' }[c] || c))
+const rawSite = (process.env.SITE_URL || (process.env.VERCEL_PROJECT_PRODUCTION_URL ? 'https://' + process.env.VERCEL_PROJECT_PRODUCTION_URL : '')).trim().replace(/\/$/, '')
+const site = /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(rawSite) ? escAttr(rawSite) : ''
+const rawPl = (process.env.PLAUSIBLE_DOMAIN || '').trim()
+const pl = /^[a-z0-9.-]+$/i.test(rawPl) ? escAttr(rawPl) : ''
+
 // Analytics sans cookie : Plausible si PLAUSIBLE_DOMAIN est défini, sinon Vercel Web Analytics sur Vercel.
 const analytics = pl
   ? `<script defer data-domain="${pl}" src="https://plausible.io/js/script.hash.js"></script>`

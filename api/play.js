@@ -1,18 +1,31 @@
-import { getSessionContext, getSupabaseConfig, readJsonBody, sendJson } from '../server/supabaseServer.js'
+import {
+  assertCsrf,
+  enforceRateLimit,
+  getSessionContext,
+  getSupabaseConfig,
+  readJsonBody,
+  safeError,
+  sendJson
+} from '../server/supabaseServer.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Méthode non autorisée.' })
+  if (!assertCsrf(req, res)) return
+
   const ctx = await getSessionContext(req, res)
   if (!ctx.configured) return sendJson(res, 503, { error: 'Service vidéo non configuré.' })
   if (!ctx.user || !ctx.sb || !ctx.accessToken) return sendJson(res, 401, { error: 'Connexion requise pour lire.' })
+  if (!enforceRateLimit(req, res, 'play', 60, 60_000, ctx.user.id)) return
 
-  const body = await readJsonBody(req)
+  let body
+  try { body = await readJsonBody(req) } catch (e) { return safeError(res, e.status || 400, 'Requête invalide.', e) }
+
   const titleId = Number(body.titleId)
   let episodeId = body.episodeId ? Number(body.episodeId) : undefined
   const seasonNum = body.seasonNum ? Number(body.seasonNum) : undefined
   const epNum = body.epNum ? Number(body.epNum) : undefined
 
-  if (!titleId) return sendJson(res, 400, { error: 'Titre invalide.' })
+  if (!Number.isInteger(titleId) || titleId <= 0) return sendJson(res, 400, { error: 'Titre invalide.' })
 
   if (epNum && !episodeId) {
     const { data } = await ctx.sb
@@ -25,7 +38,9 @@ export default async function handler(req, res) {
     episodeId = data?.id
   }
 
-  // Appel côté serveur de l'Edge Function Supabase « play » avec le JWT de l'utilisateur
+  // Pays issu des en-têtes Edge de confiance (Vercel / Cloudflare) — non falsifiable par le client
+  const edgeCountry = String(req.headers?.['x-vercel-ip-country'] || req.headers?.['cf-ipcountry'] || '').trim().toUpperCase()
+
   const cfg = getSupabaseConfig()
   try {
     const resp = await fetch(`${cfg.url}/functions/v1/play`, {
@@ -33,7 +48,8 @@ export default async function handler(req, res) {
       headers: {
         apikey: cfg.key,
         Authorization: `Bearer ${ctx.accessToken}`,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        ...(edgeCountry ? { 'x-kora-geo-country': edgeCountry } : {})
       },
       body: JSON.stringify({ titleId, episodeId })
     })
@@ -49,7 +65,9 @@ export default async function handler(req, res) {
     if (resp.status === 402 || resp.status === 403) {
       return sendJson(res, resp.status, { error: data?.error || 'Accès restreint.' })
     }
-  } catch { /* fallback ci-dessous */ }
+  } catch (e) {
+    console.error('[kora-play]', e?.message || e)
+  }
 
   return sendJson(res, 404, { error: 'Aucune source vidéo encodée pour ce titre.' })
 }

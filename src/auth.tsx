@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { apiPost } from './api'
+import { apiPost, authErrorMessage } from './api'
 import { useApp } from './store'
 import { BrandLogo, Icon } from './ui'
 
@@ -45,10 +45,9 @@ export function AuthRequiredGate({ title = 'Connexion requise', desc = 'Vous pou
 export function EmailConfirmPage({ q }: { q: URLSearchParams }) {
   const { session, toast } = useApp()
   const status = q.get('status') || ''
-  const urlMsg = q.get('msg') || ''
   const [email, setEmail] = useState(q.get('email') || '')
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState(urlMsg)
+  const [msg, setMsg] = useState(() => authErrorMessage(q.get('err')))
 
   const resend = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -141,7 +140,7 @@ export function ResetPasswordPage({ q }: { q: URLSearchParams }) {
   const [done, setDone] = useState(false)
   const [sent, setSent] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [msg, setMsg] = useState(q.get('msg') || '')
+  const [msg, setMsg] = useState(() => authErrorMessage(q.get('err')))
 
   if (done) {
     return (
@@ -164,7 +163,7 @@ export function ResetPasswordPage({ q }: { q: URLSearchParams }) {
   if (step === 'new') {
     const saveNewPw = async (e: React.FormEvent) => {
       e.preventDefault()
-      if (pw.length < 6) { setMsg('Le mot de passe doit contenir au moins 6 caractères.'); return }
+      if (pw.length < 8) { setMsg('Le mot de passe doit contenir au moins 8 caractères.'); return }
       if (pw !== pw2) { setMsg('Les deux mots de passe ne correspondent pas.'); return }
       setBusy(true); setMsg('')
       const r = await apiPost('/api/auth?action=update-password', { password: pw })
@@ -186,10 +185,10 @@ export function ResetPasswordPage({ q }: { q: URLSearchParams }) {
             <p className="mu">Choisissez un nouveau mot de passe sécurisé pour votre compte Kora.</p>
           </div>
           <label>Nouveau mot de passe
-            <input className="field" type="password" required minLength={6} value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" placeholder="6 caractères minimum" />
+            <input className="field" type="password" required minLength={8} value={pw} onChange={e => setPw(e.target.value)} autoComplete="new-password" placeholder="8 caractères minimum" />
           </label>
           <label>Confirmer le mot de passe
-            <input className="field" type="password" required minLength={6} value={pw2} onChange={e => setPw2(e.target.value)} autoComplete="new-password" placeholder="Retapez votre mot de passe" />
+            <input className="field" type="password" required minLength={8} value={pw2} onChange={e => setPw2(e.target.value)} autoComplete="new-password" placeholder="Retapez votre mot de passe" />
           </label>
           <button type="submit" className="btn p wide-btn" disabled={busy}>
             {busy ? 'Enregistrement…' : 'Enregistrer le nouveau mot de passe'}
@@ -263,7 +262,7 @@ export function Auth({ q }: { q: URLSearchParams }) {
   const [code, setCode] = useState('')
   const [sent, setSent] = useState(false)
   const [awaitingConfirm, setAwaitingConfirm] = useState(false)
-  const [msg, setMsg] = useState(q.get('error') || '')
+  const [msg, setMsg] = useState(() => authErrorMessage(q.get('err')))
   const [busy, setBusy] = useState(false)
 
   if (!authConfigured) {
@@ -377,7 +376,7 @@ export function Auth({ q }: { q: URLSearchParams }) {
               <input className="field" type="email" required value={email} onChange={e => setEmail(e.target.value)} autoComplete="email" placeholder="vous@exemple.com" />
             </label>
             <label>Mot de passe
-              <input className="field" type="password" required minLength={6} value={pw} onChange={e => setPw(e.target.value)} autoComplete={signup ? 'new-password' : 'current-password'} placeholder="6 caractères minimum" />
+              <input className="field" type="password" required minLength={signup ? 8 : 6} value={pw} onChange={e => setPw(e.target.value)} autoComplete={signup ? 'new-password' : 'current-password'} placeholder={signup ? '8 caractères minimum' : 'Votre mot de passe'} />
             </label>
           </>
         ) : (
@@ -457,6 +456,7 @@ export function AccountBox() {
   const { session, role, signOut, st, updateAccount, toast } = useApp()
   const [name, setName] = useState(st.accountName || '')
   const [country, setCountry] = useState(st.accountCountry || 'Mali')
+  const [curPw, setCurPw] = useState('')
   const [pw, setPw] = useState('')
   const [msg, setMsg] = useState('')
 
@@ -492,17 +492,21 @@ export function AccountBox() {
 
       {u.email && (
         <div className="inline">
+          <label>Mot de passe actuel
+            <input className="field narrow" type="password" autoComplete="current-password" placeholder="Requis" value={curPw} onChange={e => setCurPw(e.target.value)} />
+          </label>
           <label>Nouveau mot de passe
-            <input className="field narrow" type="password" minLength={6} autoComplete="new-password" placeholder="6 car. min." value={pw} onChange={e => setPw(e.target.value)} />
+            <input className="field narrow" type="password" minLength={8} autoComplete="new-password" placeholder="8 car. min." value={pw} onChange={e => setPw(e.target.value)} />
           </label>
           <button
             type="button"
             className="btn"
             onClick={async () => {
-              if (pw.length < 6) { setMsg('Le mot de passe doit contenir au moins 6 caractères.'); return }
-              const r = await apiPost('/api/auth?action=update-password', { password: pw })
+              if (!curPw) { setMsg('Saisissez votre mot de passe actuel pour confirmer.'); return }
+              if (pw.length < 8) { setMsg('Le nouveau mot de passe doit contenir au moins 8 caractères.'); return }
+              const r = await apiPost('/api/auth?action=update-password', { currentPassword: curPw, password: pw })
               if (!r.ok) setMsg(r.data.error || 'Impossible de modifier le mot de passe.')
-              else { toast('Mot de passe mis à jour.', 'ok'); setMsg(''); setPw('') }
+              else { toast('Mot de passe mis à jour.', 'ok'); setMsg(''); setCurPw(''); setPw('') }
             }}
           >
             Modifier le mot de passe

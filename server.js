@@ -15,8 +15,13 @@ import adminHandler from './api/admin.js'
 const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist')
 const PORT = process.env.PORT || 3000
 const prod = process.env.NODE_ENV === 'production'
-const site = (process.env.SITE_URL || '').replace(/\/$/, '')
-const plausible = process.env.PLAUSIBLE_DOMAIN
+
+const escAttr = s => String(s || '').replace(/[&"'<>]/g, c => ({ '&': '&amp;', '"': '&quot;', "'": '&#39;', '<': '&lt;', '>': '&gt;' }[c]))
+const rawSite = (process.env.SITE_URL || '').trim().replace(/\/$/, '')
+const site = /^https?:\/\/[a-z0-9.-]+(:\d+)?$/i.test(rawSite) ? rawSite : ''
+const rawPlausible = (process.env.PLAUSIBLE_DOMAIN || '').trim()
+const plausible = /^[a-z0-9.-]+$/i.test(rawPlausible) ? rawPlausible : ''
+
 const app = express()
 app.disable('x-powered-by')
 app.set('trust proxy', 1)
@@ -29,17 +34,25 @@ const CSP = [
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
   "media-src 'self' blob: https://*.supabase.co",
+  "object-src 'none'",
+  "form-action 'self'",
   "frame-ancestors 'none'",
-  "base-uri 'self'"
+  "base-uri 'self'",
+  'upgrade-insecure-requests'
 ].join('; ')
 
-// HTTPS forcé en production (derrière un proxy/CDN qui envoie X-Forwarded-Proto)
+// HTTPS forcé en production (origine canonique uniquement, jamais d'open-redirect sur Host) + en-têtes de sécurité complets
 app.use((req, res, next) => {
-  if (prod && req.headers['x-forwarded-proto'] === 'http')
-    return res.redirect(301, `https://${req.headers.host}${req.originalUrl}`)
+  if (prod && req.headers['x-forwarded-proto'] === 'http' && site) {
+    const safePath = req.originalUrl.startsWith('/') && !req.originalUrl.startsWith('//') ? req.originalUrl : '/'
+    return res.redirect(301, `${site}${safePath}`)
+  }
   if (prod) res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
   res.set({
     'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Cross-Origin-Opener-Policy': 'same-origin',
+    'Cross-Origin-Resource-Policy': 'same-origin',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
     'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
     'Content-Security-Policy': CSP
@@ -49,7 +62,7 @@ app.use((req, res, next) => {
 app.use(compression())
 app.use(express.json({ limit: '512kb' }))
 
-// Toutes les clés API et appels base de données restent exclusivement côté serveur.
+// Toutes les clés API et accès base de données restent exclusivement côté serveur.
 app.get('/api/catalog', (req, res) => catalogHandler(req, res))
 app.get('/api/health', (_req, res) => {
   res.set('Cache-Control', 'no-store')
@@ -66,9 +79,9 @@ app.use('/api', (_req, res) => res.status(404).json({ error: 'not_found' }))
 
 if (prod) {
   const html = readFileSync(path.join(dist, 'index.html'), 'utf8')
-    .replaceAll('%SITE_URL%', site)
+    .replaceAll('%SITE_URL%', escAttr(site))
     .replace('<!--ANALYTICS-->', plausible
-      ? `<script defer data-domain="${plausible}" src="https://plausible.io/js/script.hash.js"></script>` : '')
+      ? `<script defer data-domain="${escAttr(plausible)}" src="https://plausible.io/js/script.hash.js"></script>` : '')
   const studioPath = path.join(dist, 'studio.html')
   const studioHtml = existsSync(studioPath) ? readFileSync(studioPath, 'utf8') : html
 
@@ -77,11 +90,9 @@ if (prod) {
     setHeaders: (res, p) => res.set('Cache-Control',
       p.includes(`${path.sep}assets${path.sep}`) ? 'public, max-age=31536000, immutable' : 'public, max-age=3600')
   }))
-  // 2e application : Kora Studio (/studio ou /studio/)
   app.get(['/studio', '/studio/'], (_req, res) => {
     res.set('Cache-Control', 'no-cache').status(200).type('html').send(studioHtml)
   })
-  // "/" = application principale ; tout autre chemin = vraie 404
   app.get('*', (req, res) => {
     res.set('Cache-Control', 'no-cache').status(req.path === '/' ? 200 : 404).type('html').send(html)
   })

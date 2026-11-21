@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { apiGet, apiPost, AuthUser, consumeAuthRedirectTokens, uploadFileToSignedUrl } from '../api'
+import { apiGet, apiPost, authErrorMessage, AuthUser, consumeAuthRedirectTokens, uploadFileToSignedUrl } from '../api'
 import { GoogleAuthButton } from '../auth'
 import { Icon, KoraSymbol } from '../ui'
 
@@ -86,10 +86,7 @@ export default function StudioApp() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [authReady, setAuthReady] = useState(false)
   const [recoveryMode, setRecoveryMode] = useState(() => new URLSearchParams(location.search).has('recovery'))
-  const [authNotice, setAuthNotice] = useState(() => {
-    const qs = new URLSearchParams(location.search)
-    return qs.get('auth_error') || qs.get('confirm_error') || qs.get('recovery_error') || ''
-  })
+  const [authNotice, setAuthNotice] = useState(() => authErrorMessage(new URLSearchParams(location.search).get('err')))
   const [tab, setTab] = useState<StudioTab>('browse')
   const [channel, setChannel] = useState<ChannelInfo>(DEFAULT_CHANNEL)
   const [titles, setTitles] = useState<StudioTitle[]>([])
@@ -145,15 +142,15 @@ export default function StudioApp() {
       const qs = new URLSearchParams(location.search)
       const confirmedFlag = qs.has('confirmed')
       const recoveryFlag = qs.has('recovery')
-      const errMsg = qs.get('auth_error') || qs.get('confirm_error') || qs.get('recovery_error') || ''
+      const errCode = qs.get('err')
       const consumed = await consumeAuthRedirectTokens()
       if (!active) return
       await refreshSession()
       if (!active) return
 
       if (consumed.handled) {
-        if (consumed.error) {
-          setAuthNotice(consumed.error)
+        if (consumed.errCode) {
+          setAuthNotice(authErrorMessage(consumed.errCode))
           setAuthModal(true)
         } else if (consumed.flow === 'recovery') {
           setRecoveryMode(true)
@@ -168,9 +165,9 @@ export default function StudioApp() {
         history.replaceState(null, '', location.pathname)
         setRecoveryMode(true)
         setAuthModal(true)
-      } else if (errMsg) {
+      } else if (errCode) {
         history.replaceState(null, '', location.pathname)
-        setAuthNotice(errMsg)
+        setAuthNotice(authErrorMessage(errCode))
         setAuthModal(true)
       }
     })()
@@ -830,7 +827,7 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
 
   const uploadSignedAsset = async (bucket: 'posters' | 'videos', prefix: string, file: File) => {
     const sign = await apiPost<{ signedUrl: string; path: string; publicUrl?: string }>('/api/studio?action=sign-upload', {
-      bucket, prefix, fileName: file.name
+      bucket, prefix, fileName: file.name, mime: file.type, sizeBytes: file.size
     })
     if (!sign.ok || !sign.data.signedUrl) throw new Error(sign.data.error || 'Impossible de préparer le téléversement.')
     const up = await uploadFileToSignedUrl(sign.data.signedUrl, file)

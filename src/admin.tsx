@@ -459,7 +459,9 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
       bucket: 'posters',
       folder: isNew ? 'covers' : id,
       kind,
-      fileName: file.name
+      fileName: file.name,
+      mime: file.type,
+      sizeBytes: file.size
     })
     if (!sign.ok || !sign.data.signedUrl) { setMsg(sign.data.error || 'Échec préparation upload.'); return null }
     const upRes = await uploadFileToSignedUrl(sign.data.signedUrl, file)
@@ -558,7 +560,9 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
       bucket: 'videos',
       folder: id,
       kind: target.episode_id ? `ep-${target.episode_id}` : 'film',
-      fileName: file.name
+      fileName: file.name,
+      mime: file.type,
+      sizeBytes: file.size
     })
     if (!sign.ok || !sign.data.signedUrl) { setBusy(false); return setMsg(sign.data.error || 'Échec préparation upload vidéo.') }
     const upRes = await uploadFileToSignedUrl(sign.data.signedUrl, file)

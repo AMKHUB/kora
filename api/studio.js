@@ -1,4 +1,16 @@
-import { getQuery, getSessionContext, readJsonBody, safeName, sendJson } from '../server/supabaseServer.js'
+import {
+  assertCsrf,
+  enforceRateLimit,
+  getQuery,
+  getSessionContext,
+  isSafeMediaUrl,
+  isSafeStoragePath,
+  readJsonBody,
+  safeError,
+  safeName,
+  sendJson,
+  validateUploadMeta
+} from '../server/supabaseServer.js'
 
 export default async function handler(req, res) {
   const ctx = await getSessionContext(req, res)
@@ -58,54 +70,81 @@ export default async function handler(req, res) {
   }
 
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Méthode non autorisée.' })
-  const body = await readJsonBody(req)
+  if (!assertCsrf(req, res)) return
+
+  let body
+  try { body = await readJsonBody(req) } catch (e) { return safeError(res, e.status || 400, 'Requête invalide.', e) }
 
   if (action === 'channel') {
+    if (!enforceRateLimit(req, res, 'studio_channel', 15, 10 * 60_000, uid)) return
     const { error } = await db.from('creator_channels').upsert({
       account_id: uid,
-      channel_name: String(body.channel_name || '').trim() || 'Mon Studio Kora',
-      bio: String(body.bio || '').trim(),
-      country: String(body.country || 'Mali').trim(),
+      channel_name: String(body.channel_name || '').trim().slice(0, 80) || 'Mon Studio Kora',
+      bio: String(body.bio || '').trim().slice(0, 800),
+      country: String(body.country || 'Mali').trim().slice(0, 60),
       updated_at: new Date().toISOString()
     })
-    if (error) return sendJson(res, 400, { error: error.message })
+    if (error) return safeError(res, 400, 'Impossible d’enregistrer la chaîne.', error)
     return sendJson(res, 200, { ok: true })
   }
 
   if (action === 'sign-upload') {
+    if (!enforceRateLimit(req, res, 'studio_upload', 30, 15 * 60_000, uid)) return
     const bucket = body.bucket === 'videos' ? 'videos' : 'posters'
-    const prefix = safeName(body.prefix || (bucket === 'videos' ? 'vid' : 'poster'))
-    const fileName = safeName(body.fileName || 'upload')
-    const path = `creator/${uid}/${prefix}-${Date.now()}-${fileName}`
+    const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes)
+    if (!meta.ok) return sendJson(res, 400, { error: meta.error })
+
+    const prefix = safeName(body.prefix || (bucket === 'videos' ? 'vid' : 'poster')).replace(/\./g, '')
+    const path = `creator/${uid}/${prefix}-${Date.now()}-${meta.cleanName}`
     const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path)
     if (error || !data?.signedUrl) {
-      return sendJson(res, 400, { error: error?.message || 'Impossible de préparer le téléversement.' })
+      return safeError(res, 400, 'Impossible de préparer le téléversement.', error)
     }
     const publicUrl = bucket === 'posters' ? db.storage.from('posters').getPublicUrl(path).data.publicUrl : null
     return sendJson(res, 200, { signedUrl: data.signedUrl, path, publicUrl })
   }
 
   if (action === 'save-title') {
-    const title = String(body.title || '').trim()
+    if (!enforceRateLimit(req, res, 'studio_save', 20, 15 * 60_000, uid)) return
+    const title = String(body.title || '').trim().slice(0, 160)
     const status = body.status === 'published' ? 'published' : 'draft'
     const posterUrl = String(body.poster_url || '').trim()
     const backdropUrl = String(body.backdrop_url || '').trim()
+
     if (!title) return sendJson(res, 400, { error: 'Le titre est obligatoire.' })
     if (status === 'published' && !posterUrl) {
       return sendJson(res, 400, { error: 'Une page de couverture (affiche 2:3) est obligatoire pour publier sur Kora.' })
+    }
+    if (posterUrl && !isSafeMediaUrl(posterUrl, { strictSupabaseOnly: true })) {
+      return sendJson(res, 400, { error: 'URL de couverture non autorisée. Téléversez une image JPG, PNG ou WebP.' })
+    }
+    if (backdropUrl && !isSafeMediaUrl(backdropUrl, { strictSupabaseOnly: true })) {
+      return sendJson(res, 400, { error: 'URL de bannière non autorisée.' })
+    }
+
+    // Validation stricte anti-IDOR des chemins vidéo (un créateur ne peut référencer que creator/<uid>/...)
+    const rawEpisodes = Array.isArray(body.episodes) ? body.episodes : []
+    if (rawEpisodes.length > 100) return sendJson(res, 400, { error: 'Maximum 100 épisodes par envoi.' })
+    if (body.mainVideoAsset?.storage_path && !isSafeStoragePath(body.mainVideoAsset.storage_path, uid)) {
+      return sendJson(res, 403, { error: 'Chemin de fichier vidéo non autorisé.' })
+    }
+    for (const ep of rawEpisodes) {
+      if (ep?.videoAsset?.storage_path && !isSafeStoragePath(ep.videoAsset.storage_path, uid)) {
+        return sendJson(res, 403, { error: 'Chemin de fichier vidéo d’épisode non autorisé.' })
+      }
     }
 
     const payload = {
       creator_id: uid,
       title,
       type: ['series', 'film', 'doc', 'short'].includes(body.type) ? body.type : 'series',
-      year: Number(body.year) || new Date().getFullYear(),
-      duration_min: Number(body.duration_min) || 45,
-      country: String(body.country || 'Mali').trim() || 'Mali',
-      original_language: String(body.original_language || 'fr').trim() || 'fr',
-      age_rating: String(body.age_rating || 'Tous'),
+      year: Math.max(1900, Math.min(2100, Number(body.year) || new Date().getFullYear())),
+      duration_min: Math.max(1, Math.min(600, Number(body.duration_min) || 45)),
+      country: String(body.country || 'Mali').trim().slice(0, 60) || 'Mali',
+      original_language: String(body.original_language || 'fr').trim().slice(0, 8) || 'fr',
+      age_rating: ['Tous', '7+', '12+', '16+', '18+'].includes(body.age_rating) ? body.age_rating : 'Tous',
       synopsis_short: (String(body.synopsis_short || '').trim() || String(body.synopsis_long || '').trim()).slice(0, 180),
-      synopsis_long: String(body.synopsis_long || '').trim() || String(body.synopsis_short || '').trim(),
+      synopsis_long: (String(body.synopsis_long || '').trim() || String(body.synopsis_short || '').trim()).slice(0, 4000),
       status,
       is_new: true,
       poster_url: posterUrl || null,
@@ -113,23 +152,26 @@ export default async function handler(req, res) {
       updated_at: new Date().toISOString()
     }
 
-    const resTitle = body.id
-      ? await db.from('titles').update(payload).eq('id', Number(body.id)).eq('creator_id', uid).select('id').single()
+    const editId = body.id ? Number(body.id) : null
+    if (editId !== null && (!Number.isInteger(editId) || editId <= 0)) {
+      return sendJson(res, 400, { error: 'Identifiant de contenu invalide.' })
+    }
+
+    const resTitle = editId
+      ? await db.from('titles').update(payload).eq('id', editId).eq('creator_id', uid).select('id').single()
       : await db.from('titles').insert(payload).select('id').single()
-    if (resTitle.error) return sendJson(res, 400, { error: resTitle.error.message })
+    if (resTitle.error) return safeError(res, 400, 'Impossible d’enregistrer cette œuvre.', resTitle.error)
     const tid = resTitle.data.id
 
-    // Genres
-    const genres = Array.isArray(body.genres) ? body.genres : []
+    const genres = Array.isArray(body.genres) ? body.genres.slice(0, 10) : []
     if (genres.length) {
       const { data: gRows } = await db.from('genres').select('id,name').in('name', genres)
       await db.from('title_genres').delete().eq('title_id', tid)
       if (gRows?.length) await db.from('title_genres').insert(gRows.map(g => ({ title_id: tid, genre_id: g.id })))
     }
 
-    // Réalisateur & distribution
-    const dirNames = String(body.director || '').split(',').map(x => x.trim()).filter(Boolean)
-    const castNames = String(body.cast || '').split(',').map(x => x.trim()).filter(Boolean)
+    const dirNames = String(body.director || '').split(',').map(x => x.trim().slice(0, 80)).filter(Boolean).slice(0, 5)
+    const castNames = String(body.cast || '').split(',').map(x => x.trim().slice(0, 80)).filter(Boolean).slice(0, 20)
     const allPeople = [...new Set([...dirNames, ...castNames])]
     if (allPeople.length) {
       const { data: existingP } = await db.from('people').select('id,name').in('name', allPeople)
@@ -147,23 +189,23 @@ export default async function handler(req, res) {
       if (links.length) await db.from('title_people').insert(links)
     }
 
-    // Langue audio principale
     await db.from('title_languages').delete().eq('title_id', tid)
     await db.from('title_languages').insert({ title_id: tid, language_code: payload.original_language, kind: 'audio' })
 
-    // Droits
+    // Droits territoriaux & paywall (inclut '*' pour monde entier Premium — Finding #8 !)
     await db.from('rights').delete().eq('title_id', tid)
     const accessTier = body.access_tier === 'premium' ? 'premium' : 'free'
     if (body.rights_scope === 'mali') {
       await db.from('rights').insert({ title_id: tid, country: 'Mali', access: accessTier })
     } else if (body.rights_scope === 'west_africa') {
       await db.from('rights').insert(['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger'].map(c => ({ title_id: tid, country: c, access: accessTier })))
+    } else if (accessTier === 'premium') {
+      await db.from('rights').insert({ title_id: tid, country: '*', access: 'premium' })
     }
 
-    // Saisons & épisodes
     const episodeMap = []
-    if (payload.type === 'series' && Array.isArray(body.episodes)) {
-      const seasonNums = [...new Set(body.episodes.map(e => Number(e.season) || 1))].sort((a, b) => a - b)
+    if (payload.type === 'series' && rawEpisodes.length) {
+      const seasonNums = [...new Set(rawEpisodes.map(e => Math.max(1, Number(e.season) || 1)))].sort((a, b) => a - b)
       const { data: existingSeasons } = await db.from('seasons').select('id,number').eq('title_id', tid)
       const sMap = new Map((existingSeasons || []).map(s => [s.number, s.id]))
       for (const sn of seasonNums) {
@@ -172,25 +214,25 @@ export default async function handler(req, res) {
           if (insS) sMap.set(sn, insS.id)
         }
       }
-      for (const ep of body.episodes) {
-        const sid = sMap.get(Number(ep.season) || 1)
+      for (const ep of rawEpisodes) {
+        const sid = sMap.get(Math.max(1, Number(ep.season) || 1))
         if (!sid) continue
         let epId = ep.dbId ? Number(ep.dbId) : null
-        if (epId) {
+        if (epId && Number.isInteger(epId) && epId > 0) {
           await db.from('episodes').update({
-            title: String(ep.title || 'Épisode'),
-            synopsis: String(ep.synopsis || '').trim() || null,
-            duration_min: Number(ep.duration_min) || 45,
-            intro_end_sec: Number(ep.intro_end_sec) || 75
-          }).eq('id', epId)
+            title: String(ep.title || 'Épisode').slice(0, 120),
+            synopsis: String(ep.synopsis || '').trim().slice(0, 1000) || null,
+            duration_min: Math.max(1, Math.min(300, Number(ep.duration_min) || 45)),
+            intro_end_sec: Math.max(0, Math.min(600, Number(ep.intro_end_sec) || 75))
+          }).eq('id', epId).eq('season_id', sid)
         } else {
           const { data: insE } = await db.from('episodes').insert({
             season_id: sid,
-            number: Number(ep.number) || 1,
-            title: String(ep.title || 'Épisode'),
-            synopsis: String(ep.synopsis || '').trim() || null,
-            duration_min: Number(ep.duration_min) || 45,
-            intro_end_sec: Number(ep.intro_end_sec) || 75
+            number: Math.max(1, Number(ep.number) || 1),
+            title: String(ep.title || 'Épisode').slice(0, 120),
+            synopsis: String(ep.synopsis || '').trim().slice(0, 1000) || null,
+            duration_min: Math.max(1, Math.min(300, Number(ep.duration_min) || 45)),
+            intro_end_sec: Math.max(0, Math.min(600, Number(ep.intro_end_sec) || 75))
           }).select('id').single()
           epId = insE?.id || null
         }
@@ -201,8 +243,8 @@ export default async function handler(req, res) {
             await db.from('video_assets').insert({
               episode_id: epId,
               storage_path: ep.videoAsset.storage_path,
-              size_bytes: Number(ep.videoAsset.size_bytes) || 0,
-              mime: String(ep.videoAsset.mime || 'video/mp4'),
+              size_bytes: Math.max(0, Number(ep.videoAsset.size_bytes) || 0),
+              mime: String(ep.videoAsset.mime || 'video/mp4').slice(0, 40),
               status: 'ready'
             })
           }
@@ -213,8 +255,8 @@ export default async function handler(req, res) {
       await db.from('video_assets').insert({
         title_id: tid,
         storage_path: body.mainVideoAsset.storage_path,
-        size_bytes: Number(body.mainVideoAsset.size_bytes) || 0,
-        mime: String(body.mainVideoAsset.mime || 'video/mp4'),
+        size_bytes: Math.max(0, Number(body.mainVideoAsset.size_bytes) || 0),
+        mime: String(body.mainVideoAsset.mime || 'video/mp4').slice(0, 40),
         status: 'ready'
       })
     }
@@ -224,6 +266,7 @@ export default async function handler(req, res) {
 
   if (action === 'toggle-publish') {
     const id = Number(body.id)
+    if (!Number.isInteger(id) || id <= 0) return sendJson(res, 400, { error: 'Identifiant invalide.' })
     const next = body.status === 'published' ? 'published' : 'draft'
     const { data: row } = await db.from('titles').select('poster_url').eq('id', id).eq('creator_id', uid).maybeSingle()
     if (!row) return sendJson(res, 404, { error: 'Contenu introuvable.' })
@@ -231,14 +274,15 @@ export default async function handler(req, res) {
       return sendJson(res, 400, { error: 'Ajoutez d’abord une page de couverture (affiche 2:3) avant de publier.' })
     }
     const { error } = await db.from('titles').update({ status: next, updated_at: new Date().toISOString() }).eq('id', id).eq('creator_id', uid)
-    if (error) return sendJson(res, 400, { error: error.message })
+    if (error) return safeError(res, 400, 'Impossible de modifier la visibilité.', error)
     return sendJson(res, 200, { ok: true })
   }
 
   if (action === 'delete-title') {
     const id = Number(body.id)
+    if (!Number.isInteger(id) || id <= 0) return sendJson(res, 400, { error: 'Identifiant invalide.' })
     const { error } = await db.from('titles').delete().eq('id', id).eq('creator_id', uid)
-    if (error) return sendJson(res, 400, { error: error.message })
+    if (error) return safeError(res, 400, 'Impossible de supprimer ce contenu.', error)
     return sendJson(res, 200, { ok: true })
   }
 

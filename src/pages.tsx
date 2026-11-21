@@ -91,11 +91,11 @@ export function Home() {
       <>
         <header className="empty-catalog-hero">
           <div className="empty-catalog-inner">
-            <BrandLogo height={44} />
+            <BrandLogo height={48} />
             <span className="pill-accent">Cinéma & Séries d’Afrique</span>
-            <h1>Le catalogue Kora est prêt pour vos premières séries</h1>
+            <h1>La maison du cinéma malien, africain et de la diaspora</h1>
             <p className="mu">
-              Les œuvres fictives sans couverture ont été retirées. Ajoutez vos propres séries avec page de couverture, synopsis et épisodes depuis l’Espace Administrateur ou Kora Studio.
+              Un écrin éditorial dédié aux grandes histoires du continent. Ajoutez vos séries avec page de couverture, synopsis, épisodes et sous-titres synchronisés depuis l’Espace Administrateur ou Kora Studio.
             </p>
             <div className="btns" style={{ justifyContent: 'center' }}>
               {!session ? (
@@ -108,6 +108,24 @@ export function Home() {
                   <a className={'btn' + (role !== 'admin' ? ' p' : '')} href="/studio/"><Icon n="studio" s={18} />Publier sur Kora Studio</a>
                 </>
               )}
+              <a className="btn" href="/studio/"><Icon n="film" s={18} />Découvrir Kora Studio</a>
+            </div>
+            <div className="empty-pillars">
+              <div className="pillar-card">
+                <Icon n="film" s={22} />
+                <strong>Catalogue curaté</strong>
+                <small className="mu">Séries, films, documentaires et courts-métrages avec affiches officielles.</small>
+              </div>
+              <div className="pillar-card">
+                <Icon n="captions" s={22} />
+                <strong>Streaming & Voix claire</strong>
+                <small className="mu">HLS adaptatif 3G/4G/4K et sous-titres synchronisés à la voix.</small>
+              </div>
+              <div className="pillar-card">
+                <Icon n="studio" s={22} />
+                <strong>Studio Créateurs</strong>
+                <small className="mu">Mettez en ligne vos saisons, épisodes et couvertures comme sur YouTube Studio.</small>
+              </div>
             </div>
           </div>
         </header>
@@ -773,7 +791,7 @@ export function Profile() {
 
   const switchProfile = (p: ProfileType) => {
     if (p.id === st.cur) return
-    if (p.pinHash) setPinTarget(p)
+    if (p.hasPin) setPinTarget(p)
     else selectProfile(p.id)
   }
 
@@ -823,7 +841,7 @@ export function Profile() {
                   <strong>{p.name}</strong>
                   <small className="mu">
                     {p.kid ? 'Enfant (7+ max)' : 'Adulte'}
-                    {p.pinHash ? ' · PIN' : ''}
+                    {p.hasPin ? ' · PIN' : ''}
                   </small>
                 </div>
               </button>
@@ -924,7 +942,7 @@ export function Profile() {
             </label>
             <div className="btns">
               <button type="submit" className="btn p">Enregistrer</button>
-              {editing.pinHash && (
+              {editing.hasPin && (
                 <button type="button" className="btn" onClick={async () => { await updateProfile(editing.id, { pin: null }); setEditing(null) }}>
                   Retirer le PIN
                 </button>
@@ -1042,7 +1060,7 @@ export function Settings() {
                   <small className="mu">{fmtDate(n.date)}</small>
                 </div>
                 <div className="notif-acts">
-                  {n.link && <a className="btn" href={n.link} onClick={() => markNotificationsRead(n.id)}>Voir</a>}
+                  {n.link && (n.link.startsWith('#/') || n.link.startsWith('/')) && <a className="btn" href={n.link} onClick={() => markNotificationsRead(n.id)}>Voir</a>}
                   {!n.read && <button type="button" className="lnk" onClick={() => markNotificationsRead(n.id)}>Lu</button>}
                 </div>
               </li>

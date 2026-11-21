@@ -60,7 +60,7 @@ export type Profile = {
   hist: Record<number, number>
   epHist: Record<string, number>
   rate: Record<number, string>
-  pinHash?: string
+  hasPin?: boolean
 }
 
 export type Invoice = {
@@ -399,11 +399,11 @@ export function Provider({ children }: { children: ReactNode }) {
       await refreshSession()
       if (!active) return
       if (consumed.handled) {
-        if (consumed.error) {
-          const enc = encodeURIComponent(consumed.error)
+        if (consumed.errCode) {
+          const enc = encodeURIComponent(consumed.errCode)
           location.hash = consumed.flow === 'recovery'
-            ? `#/reinitialisation?status=error&msg=${enc}`
-            : `#/confirmation?status=error&msg=${enc}`
+            ? `#/reinitialisation?status=error&err=${enc}`
+            : `#/confirmation?status=error&err=${enc}`
         } else if (consumed.flow === 'recovery') {
           location.hash = '#/reinitialisation?step=new'
         } else if (consumed.flow === 'confirm') {
@@ -421,8 +421,7 @@ export function Provider({ children }: { children: ReactNode }) {
     if (!session) return
     const curDev = detectDevice()
     ;(async () => {
-      const qs = new URLSearchParams({ action: 'sync', deviceName: curDev.name, devicePlatform: curDev.platform })
-      const res = await apiGet<any>(`/api/me?${qs}`)
+      const res = await apiGet<any>('/api/me?action=sync')
       if (!res.ok || !res.data) return
       const d = res.data
       setRole(d.account?.role || role || 'user')
@@ -431,7 +430,10 @@ export function Provider({ children }: { children: ReactNode }) {
       const mappedDevices: DeviceInfo[] = (d.devices || []).map((dv: any) => ({
         id: dv.id, name: dv.name, platform: dv.platform || 'Web', lastSeen: dv.last_seen_at, current: dv.name === curDev.name
       }))
-      if (!mappedDevices.length) mappedDevices.push(curDev)
+      if (!mappedDevices.length) {
+        mappedDevices.push(curDev)
+        apiPost('/api/me?action=register-device', { name: curDev.name, platform: curDev.platform })
+      }
 
       const dbPlan = (d.subscription?.plan_id as PlanId) || 'free'
       const mappedInvoices: Invoice[] = (d.payments || []).map((p: any) => ({
@@ -471,7 +473,7 @@ export function Provider({ children }: { children: ReactNode }) {
             name: p.name,
             avatar: p.avatar || AVATARS[idx % AVATARS.length].id,
             kid: !!p.is_kid,
-            pinHash: p.pin_hash || undefined,
+            hasPin: !!p.has_pin,
             list: mine(d.my_list, p.id).map((x: any) => x.title_id),
             hist: Object.fromEntries(mine(d.watch_progress, p.id).filter((x: any) => x.episode_id === 0).map((x: any) => [x.title_id, x.position_sec])),
             epHist: {},
@@ -564,10 +566,9 @@ export function Provider({ children }: { children: ReactNode }) {
         toast(`Votre formule permet ${maxProfiles} profils maximum. Passez à Premium ou Famille.`, 'err')
         return
       }
-      const pinHash = pin ? await hashPin(pin) : undefined
-      const res = await apiPost<{ id: string }>('/api/me?action=add-profile', { name, isKid: kid, avatar, pinHash })
+      const res = await apiPost<{ id: string; has_pin?: boolean }>('/api/me?action=add-profile', { name, isKid: kid, avatar, pin: pin || undefined })
       if (res.ok && res.data.id) {
-        setSt(s => ({ ...s, profiles: [...s.profiles, { id: res.data.id, name, avatar, kid, pinHash, list: [], hist: {}, epHist: {}, rate: {} }] }))
+        setSt(s => ({ ...s, profiles: [...s.profiles, { id: res.data.id, name, avatar, kid, hasPin: !!res.data.has_pin, list: [], hist: {}, epHist: {}, rate: {} }] }))
         toast(`Profil « ${name} » créé.`, 'ok')
       } else {
         toast(res.data.error || 'Impossible de créer le profil.', 'err')
@@ -575,7 +576,18 @@ export function Provider({ children }: { children: ReactNode }) {
     },
     updateProfile: async (id, patch) => {
       if (!requireAuth('modifier un profil')) return
-      const pinHash = patch.pin === null ? undefined : patch.pin ? await hashPin(patch.pin) : undefined
+      if (/^[0-9a-f-]{36}$/i.test(id)) {
+        const res = await apiPost('/api/me?action=update-profile', {
+          id,
+          patch: {
+            ...(patch.name !== undefined ? { name: patch.name } : {}),
+            ...(patch.kid !== undefined ? { kid: patch.kid } : {}),
+            ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
+            ...(patch.pin !== undefined ? { pin: patch.pin } : {})
+          }
+        })
+        if (!res.ok) { toast(res.data.error || 'Impossible de mettre à jour le profil.', 'err'); return }
+      }
       setSt(s => ({
         ...s,
         profiles: s.profiles.map(p => p.id === id ? {
@@ -583,20 +595,9 @@ export function Provider({ children }: { children: ReactNode }) {
           name: patch.name ?? p.name,
           kid: patch.kid ?? p.kid,
           avatar: patch.avatar ?? p.avatar,
-          pinHash: patch.pin === undefined ? p.pinHash : pinHash
+          hasPin: patch.pin === undefined ? p.hasPin : Boolean(patch.pin)
         } : p)
       }))
-      if (/^[0-9a-f-]{36}$/i.test(id)) {
-        await apiPost('/api/me?action=update-profile', {
-          id,
-          patch: {
-            ...(patch.name !== undefined ? { name: patch.name } : {}),
-            ...(patch.kid !== undefined ? { kid: patch.kid } : {}),
-            ...(patch.avatar !== undefined ? { avatar: patch.avatar } : {}),
-            ...(patch.pin !== undefined ? { pinHash: pinHash || null } : {})
-          }
-        })
-      }
       toast('Profil mis à jour.', 'ok')
     },
     deleteProfile: async id => {
@@ -622,10 +623,13 @@ export function Provider({ children }: { children: ReactNode }) {
     },
     verifyProfilePin: async (profileId, pin) => {
       const p = st.profiles.find(x => x.id === profileId)
-      if (!p?.pinHash) return true
-      if (p.pinHash.startsWith('raw:')) return p.pinHash === 'raw:' + pin.trim()
-      const hashed = await hashPin(pin)
-      return hashed === p.pinHash
+      if (!p?.hasPin) return true
+      const res = await apiPost<{ valid?: boolean }>('/api/me?action=verify-pin', { profileId, pin })
+      if (!res.ok) {
+        if (res.status === 429) toast(res.data.error || 'Trop de tentatives PIN.', 'err')
+        return false
+      }
+      return Boolean(res.data.valid)
     },
     subscribePlan: async (planId, billing, provider, customerRef = '') => {
       if (!requireAuth('gérer votre abonnement')) return { ok: false, error: 'Connexion requise.' }

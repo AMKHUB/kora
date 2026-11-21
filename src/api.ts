@@ -1,5 +1,5 @@
 // Client interne same-origin : aucune clé API ni service externe dans le code front-end.
-// Toutes les requêtes authentifiées utilisent des cookies HttpOnly gérés exclusivement par le serveur (/api/*).
+// Toutes les requêtes authentifiées utilisent des cookies __Host- HttpOnly + en-tête anti-CSRF X-Kora-Request.
 
 export type AuthUser = {
   id: string
@@ -15,9 +15,25 @@ export type ApiResponse<T = any> = {
   data: T & { error?: string; message?: string }
 }
 
+const AUTH_ERROR_CODES: Record<string, string> = {
+  oauth_denied: 'Connexion Google annulée ou refusée.',
+  oauth_failed: 'Impossible de finaliser la connexion Google. Veuillez réessayer.',
+  link_expired: 'Ce lien est invalide ou a expiré. Demandez-en un nouveau ci-dessous.',
+  session_expired: 'Votre session de vérification a expiré. Veuillez recommencer.'
+}
+
+export function authErrorMessage(code: string | null | undefined): string {
+  if (!code) return ''
+  return AUTH_ERROR_CODES[code] || 'Une erreur de vérification est survenue. Veuillez réessayer.'
+}
+
 export async function apiGet<T = any>(path: string): Promise<ApiResponse<T>> {
   try {
-    const res = await fetch(path, { method: 'GET', credentials: 'same-origin' })
+    const res = await fetch(path, {
+      method: 'GET',
+      credentials: 'same-origin',
+      headers: { 'X-Kora-Request': '1' }
+    })
     const data = await res.json().catch(() => ({}))
     return { ok: res.ok, status: res.status, data }
   } catch {
@@ -30,7 +46,10 @@ export async function apiPost<T = any>(path: string, body: Record<string, unknow
     const res = await fetch(path, {
       method: 'POST',
       credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Kora-Request': '1'
+      },
       body: JSON.stringify(body)
     })
     const data = await res.json().catch(() => ({}))
@@ -60,7 +79,7 @@ export async function uploadFileToSignedUrl(signedUrl: string, file: File): Prom
 export async function consumeAuthRedirectTokens(): Promise<{
   handled: boolean
   flow?: 'confirm' | 'recovery' | 'google'
-  error?: string
+  errCode?: string
 }> {
   const search = new URLSearchParams(location.search)
   const rawHash = location.hash.replace(/^#/, '')
@@ -70,7 +89,6 @@ export async function consumeAuthRedirectTokens(): Promise<{
   const errDesc = hashParams.get('error_description') || hashParams.get('error') || search.get('error_description') || search.get('error')
   const accessToken = hashParams.get('access_token')
   const refreshToken = hashParams.get('refresh_token') || ''
-  const expiresIn = hashParams.get('expires_in') || ''
   const tokenHash = search.get('token_hash')
   const code = search.get('code')
   const type = hashParams.get('type') || search.get('type') || ''
@@ -87,25 +105,22 @@ export async function consumeAuthRedirectTokens(): Promise<{
         ? 'confirm'
         : 'google'
 
-  // Nettoyer immédiatement les jetons sensibles de la barre d'adresse
-  const cleanPath = location.pathname
-  history.replaceState(null, '', cleanPath)
+  history.replaceState(null, '', location.pathname)
 
   if (errDesc) {
-    return { handled: true, flow, error: decodeURIComponent(errDesc.replace(/\+/g, ' ')) }
+    return { handled: true, flow, errCode: flow === 'google' ? 'oauth_denied' : 'link_expired' }
   }
 
   const res = await apiPost('/api/auth?action=verify-hash', {
     access_token: accessToken || undefined,
     refresh_token: refreshToken || undefined,
-    expires_in: expiresIn ? Number(expiresIn) : undefined,
     token_hash: tokenHash || undefined,
     type: type || undefined,
     code: code || undefined
   })
 
   if (!res.ok) {
-    return { handled: true, flow, error: res.data.error || 'Lien invalide ou expiré.' }
+    return { handled: true, flow, errCode: 'link_expired' }
   }
   return { handled: true, flow }
 }
