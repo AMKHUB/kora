@@ -84,6 +84,12 @@ function Stats() {
   const { billingSimulation, maintenanceMode, maintenanceMessage, updatePlatformSettings, toast } = useApp()
   const [s, setS] = useState<any>(null)
   const [logs, setLogs] = useState<any[]>([])
+  const [r2Status, setR2Status] = useState<{ configured: boolean; accountId: string; bucket: string; maxVideoMb: number }>({
+    configured: false,
+    accountId: '13542688dd607875e5a443ef3b10643e',
+    bucket: 'kora-videos',
+    maxVideoMb: 50
+  })
   const [err, setErr] = useState('')
   const [maintDraft, setMaintDraft] = useState(maintenanceMessage)
   const [ctrlBusy, setCtrlBusy] = useState(false)
@@ -91,9 +97,13 @@ function Stats() {
   useEffect(() => { setMaintDraft(maintenanceMessage) }, [maintenanceMessage])
 
   useEffect(() => {
-    apiGet<{ stats: any; logs: any[] }>('/api/admin?action=stats').then(r => {
+    apiGet<{ stats: any; logs: any[]; r2Status?: any }>('/api/admin?action=stats').then(r => {
       if (!r.ok) setErr(r.data.error || 'Erreur de chargement.')
-      else { setS(r.data.stats); setLogs(r.data.logs || []) }
+      else {
+        setS(r.data.stats)
+        setLogs(r.data.logs || [])
+        if (r.data.r2Status) setR2Status(r.data.r2Status)
+      }
     })
   }, [])
 
@@ -218,6 +228,33 @@ function Stats() {
                 {maintenanceMode ? 'Désactiver la maintenance (Ouvrir le site)' : 'Afficher la page de maintenance'}
               </button>
               <a className="btn" href="#/maintenance">Aperçu de la page de maintenance</a>
+            </div>
+          </div>
+
+          <div className="control-card">
+            <div className="control-top">
+              <div>
+                <strong>Stockage Vidéo Grande Capacité (Cloudflare R2)</strong>
+                <p className="mu">
+                  {r2Status.configured
+                    ? `Connecté au compartiment « ${r2Status.bucket} » · Téléversement jusqu’à 5 Go par film ou épisode · Bande passante 0 €.`
+                    : 'Prêt pour vos longs-métrages (jusqu’à 5 Go/fichier et bande passante gratuite). En attendant l’activation de votre compartiment R2, le stockage standard 50 Mo assure automatiquement le relais.'}
+                </p>
+              </div>
+              <span className={r2Status.configured ? 'pill-ok' : 'pill-spec'}>
+                {r2Status.configured ? 'Cloudflare R2 Actif (5 Go)' : 'Relais 50 Mo actif'}
+              </span>
+            </div>
+            <div className="btns flush">
+              <a
+                className="btn"
+                href={`https://dash.cloudflare.com/${r2Status.accountId}/r2/overview`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Icon n="upload" s={18} />
+                Ouvrir Cloudflare R2 ({r2Status.bucket})
+              </a>
             </div>
           </div>
         </div>

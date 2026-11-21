@@ -93,6 +93,7 @@ export default function StudioApp() {
   const [tab, setTab] = useState<StudioTab>('browse')
   const [channel, setChannel] = useState<ChannelInfo>(DEFAULT_CHANNEL)
   const [titles, setTitles] = useState<StudioTitle[]>([])
+  const [r2Enabled, setR2Enabled] = useState(false)
   const [publicItems, setPublicItems] = useState<PublicCatalogItem[]>([])
   const [publicLoading, setPublicLoading] = useState(true)
   const [publicSearch, setPublicSearch] = useState('')
@@ -117,10 +118,11 @@ export default function StudioApp() {
   }
 
   const loadCloudCreatorData = async () => {
-    const r = await apiGet<{ channel: ChannelInfo | null; titles: StudioTitle[] }>('/api/studio?action=data')
+    const r = await apiGet<{ channel: ChannelInfo | null; titles: StudioTitle[]; r2Enabled?: boolean }>('/api/studio?action=data')
     if (r.ok) {
       if (r.data.channel) setChannel(r.data.channel)
       setTitles(r.data.titles || [])
+      setR2Enabled(Boolean(r.data.r2Enabled))
     }
   }
 
@@ -528,6 +530,7 @@ export default function StudioApp() {
                   key={editing ? `edit-${editing.id}` : 'new'}
                   initial={editing}
                   channel={channel}
+                  r2Enabled={r2Enabled}
                   onSaved={async (saved) => {
                     await Promise.all([loadCloudCreatorData(), loadPublicCatalog()])
                     notify(saved.status === 'published' ? `« ${saved.title} » est publié sur Kora !` : `« ${saved.title} » enregistré en brouillon.`)
@@ -752,9 +755,10 @@ function StudioAuthForm({ recovery, initialMsg = '', onSuccess, onBrowse }: {
 /* ============================================================================
    ASSISTANT DE MISE EN LIGNE (4 ÉTAPES FAÇON YOUTUBE STUDIO)
    ============================================================================ */
-function UploadWizard({ initial, channel, onSaved, onCancel }: {
+function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
   initial: StudioTitle | null
   channel: ChannelInfo
+  r2Enabled: boolean
   onSaved: (t: { title: string; status: string }) => Promise<void>
   onCancel: () => void
 }) {
@@ -1129,7 +1133,7 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
                       ) : (
                         <>
                           <strong>Déposez ou choisissez la vidéo de l’épisode (MP4, WebM, MOV)</strong>
-                          <span className="mu">Limite 50 Mo par fichier</span>
+                          <span className="mu">{r2Enabled ? 'Jusqu’à 5 Go par fichier (Cloudflare R2)' : 'Limite 50 Mo par fichier'}</span>
                         </>
                       )}
                     </div>
@@ -1152,7 +1156,7 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
                   <input type="file" accept="video/mp4,video/webm,video/quicktime" onChange={e => handleMainVideo(e.target.files?.[0])} aria-label="Téléverser le fichier vidéo" />
                   <div className="drop-icon"><Icon n="upload" s={26} /></div>
                   <strong>Glissez-déposez votre fichier vidéo ici</strong>
-                  <span className="mu">MP4, WebM ou MOV · 50 Mo max</span>
+                  <span className="mu">{r2Enabled ? 'MP4, WebM ou MOV · jusqu’à 5 Go (Cloudflare R2)' : 'MP4, WebM ou MOV · 50 Mo max'}</span>
                   {mainVideoFile && <span className="pill-ok">{mainVideoFile.name} ({Math.max(1, Math.round(mainVideoFile.size / 1048576))} Mo)</span>}
                 </div>
                 {mainVideoPreview && (

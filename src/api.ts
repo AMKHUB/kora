@@ -61,14 +61,29 @@ export async function apiPost<T = any>(path: string, body: Record<string, unknow
 
 export async function uploadFileToSignedUrl(signedUrl: string, file: File): Promise<{ ok: boolean; error?: string }> {
   try {
-    const fd = new FormData()
-    fd.append('cacheControl', '3600')
-    fd.append('', file)
-    const res = await fetch(signedUrl, { method: 'PUT', body: fd })
+    const isR2 = signedUrl.includes('r2.cloudflarestorage.com') || signedUrl.includes('X-Amz-Signature=')
+    let res: Response
+    if (isR2) {
+      res = await fetch(signedUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'video/mp4' },
+        body: file
+      })
+    } else {
+      const fd = new FormData()
+      fd.append('cacheControl', '3600')
+      fd.append('', file)
+      res = await fetch(signedUrl, { method: 'PUT', body: fd })
+    }
     if (!res.ok) {
       const txt = await res.text().catch(() => '')
       const large = /exceed|size|large|413/i.test(txt) || res.status === 413
-      return { ok: false, error: large ? 'Fichier trop volumineux (limite 50 Mo).' : `Échec du téléversement (${res.status}).` }
+      return {
+        ok: false,
+        error: large
+          ? (isR2 ? 'Fichier trop volumineux (limite 5 Go sur Cloudflare R2).' : 'Fichier trop volumineux (limite 50 Mo).')
+          : `Échec du téléversement (${res.status}).`
+      }
     }
     return { ok: true }
   } catch {

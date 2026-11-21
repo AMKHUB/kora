@@ -29,11 +29,11 @@ app.set('trust proxy', 1)
 const CSP = [
   "default-src 'self'",
   "script-src 'self' https://plausible.io",
-  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://plausible.io",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.r2.cloudflarestorage.com https://*.r2.dev https://plausible.io",
   "img-src 'self' data: blob: https://*.supabase.co",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "media-src 'self' blob: https://*.supabase.co",
+  "media-src 'self' blob: https://*.supabase.co https://*.r2.cloudflarestorage.com https://*.r2.dev",
   "object-src 'none'",
   "form-action 'self'",
   "frame-ancestors 'none'",

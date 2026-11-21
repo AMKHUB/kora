@@ -34,7 +34,7 @@ BEGIN
     IF NEW.storage_path LIKE '%..%' OR NEW.storage_path LIKE '/%' OR NEW.storage_path LIKE '%\%' THEN
       RAISE EXCEPTION 'Chemin de stockage vidéo invalide';
     END IF;
-    IF NOT v_is_admin AND NEW.storage_path !~ ('^creator/' || v_uid::text || '/[A-Za-z0-9._-]+$') THEN
+    IF NOT v_is_admin AND NEW.storage_path !~ ('^(r2:)?creator/' || v_uid::text || '/[A-Za-z0-9._-]+$') THEN
       RAISE EXCEPTION 'Un créateur ne peut référencer que ses propres fichiers vidéo';
     END IF;
   END IF;

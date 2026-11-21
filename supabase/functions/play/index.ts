@@ -36,7 +36,6 @@ Deno.serve(async (req) => {
   if (!Number.isInteger(titleId) || titleId <= 0) return json({ error: 'Requête invalide' }, 400)
   if (episodeId !== null && (!Number.isInteger(episodeId) || episodeId <= 0)) return json({ error: 'Épisode invalide' }, 400)
 
-  // Anti-IDOR : vérifier que l'épisode demandé appartient bien au titre demandé
   if (episodeId !== null) {
     const { data: epCheck } = await db
       .from('episodes')
@@ -89,20 +88,24 @@ Deno.serve(async (req) => {
   const { data: asset } = await (episodeId !== null ? q.eq('episode_id', episodeId) : q.eq('title_id', titleId)).maybeSingle()
 
   let url = ''
+  let r2Path = ''
   if (asset?.hls_url && /^https:\/\//i.test(asset.hls_url)) {
     url = asset.hls_url
+  } else if (asset?.storage_path && asset.storage_path.startsWith('r2:') && !asset.storage_path.includes('..')) {
+    r2Path = asset.storage_path
   } else if (asset?.storage_path && !asset.storage_path.includes('..') && !asset.storage_path.startsWith('/')) {
     const { data: signed } = await db.storage.from('videos').createSignedUrl(asset.storage_path, 3600)
     if (signed?.signedUrl) url = signed.signedUrl
   }
 
-  if (!url) return json({ error: 'Aucune vidéo' }, 404)
+  if (!url && !r2Path) return json({ error: 'Aucune vidéo' }, 404)
 
   const sq = db.from('subtitles').select('id,language_code,language_label,vtt_content,offset_ms,source').order('id')
   const { data: subtitles } = await (episodeId !== null ? sq.eq('episode_id', episodeId) : sq.eq('title_id', titleId).is('episode_id', null))
 
   return json({
-    url,
+    url: url || null,
+    r2Path: r2Path || null,
     mime: asset?.mime || null,
     plan,
     ads: !isPaid && !isPrivileged,

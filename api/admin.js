@@ -12,6 +12,7 @@ import {
   sendJson,
   validateUploadMeta
 } from '../server/supabaseServer.js'
+import { createR2UploadUrl, getR2Config, isR2Configured } from '../server/r2Storage.js'
 
 const UUID_RE = /^[0-9a-f-]{36}$/i
 const VALID_ROLES = new Set(['user', 'moderator', 'admin'])
@@ -59,7 +60,18 @@ export default async function handler(req, res) {
         getPlatformSettings()
       ])
       if (stats.error) return safeError(res, 400, 'Impossible de charger les statistiques.', stats.error)
-      return sendJson(res, 200, { stats: stats.data, logs: logs.data || [], platformSettings: ps })
+      const r2 = getR2Config()
+      return sendJson(res, 200, {
+        stats: stats.data,
+        logs: logs.data || [],
+        platformSettings: ps,
+        r2Status: {
+          configured: r2.configured,
+          accountId: r2.accountId,
+          bucket: r2.bucket,
+          maxVideoMb: r2.configured ? 5120 : 50
+        }
+      })
     }
 
     if (action === 'reports') {
@@ -206,19 +218,27 @@ export default async function handler(req, res) {
 
   if (action === 'sign-upload') {
     const bucket = body.bucket === 'videos' ? 'videos' : 'posters'
-    const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes)
+    const useR2 = bucket === 'videos' && isR2Configured()
+    const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes, { useR2 })
     if (!meta.ok) return sendJson(res, 400, { error: meta.error })
 
     const folderRaw = String(body.folder || 'admin').trim()
     const folder = /^[a-zA-Z0-9_-]{1,64}$/.test(folderRaw) ? folderRaw : 'admin'
     const kind = safeName(body.kind || (bucket === 'videos' ? 'video' : 'poster')).replace(/\./g, '')
     const path = `${folder}/${kind}-${Date.now()}-${meta.cleanName}`
+
+    if (useR2) {
+      const r2 = createR2UploadUrl(path, 3600)
+      if (!r2?.signedUrl) return sendJson(res, 500, { error: 'Impossible de préparer le téléversement Cloudflare R2.' })
+      return sendJson(res, 200, { signedUrl: r2.signedUrl, path: r2.storagePath, publicUrl: null, provider: 'r2' })
+    }
+
     const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path)
     if (error || !data?.signedUrl) {
       return safeError(res, 400, 'Impossible de préparer le téléversement.', error)
     }
     const publicUrl = bucket === 'posters' ? db.storage.from('posters').getPublicUrl(path).data.publicUrl : null
-    return sendJson(res, 200, { signedUrl: data.signedUrl, path, publicUrl })
+    return sendJson(res, 200, { signedUrl: data.signedUrl, path, publicUrl, provider: 'supabase' })
   }
 
   if (action === 'save-title') {

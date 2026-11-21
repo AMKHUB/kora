@@ -391,7 +391,7 @@ const ALLOWED_POSTER_MIME = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const ALLOWED_VIDEO_EXT = new Set(['mp4', 'webm', 'mov'])
 const ALLOWED_VIDEO_MIME = new Set(['video/mp4', 'video/webm', 'video/quicktime'])
 
-export function validateUploadMeta(bucket, fileName, mimeType, sizeBytes) {
+export function validateUploadMeta(bucket, fileName, mimeType, sizeBytes, { useR2 = false } = {}) {
   const clean = safeName(fileName)
   const ext = clean.includes('.') ? clean.split('.').pop().toLowerCase() : ''
   const mime = String(mimeType || '').toLowerCase().trim()
@@ -406,7 +406,15 @@ export function validateUploadMeta(bucket, fileName, mimeType, sizeBytes) {
   if (bucket === 'videos') {
     if (!ALLOWED_VIDEO_EXT.has(ext)) return { ok: false, error: 'Format vidéo non autorisé (MP4, WebM ou MOV uniquement).' }
     if (mime && !ALLOWED_VIDEO_MIME.has(mime)) return { ok: false, error: 'Type MIME vidéo non autorisé.' }
-    if (size > 50 * 1024 * 1024) return { ok: false, error: 'Vidéo supérieure à 50 Mo.' }
+    const maxBytes = useR2 ? 5 * 1024 * 1024 * 1024 : 50 * 1024 * 1024
+    if (size > maxBytes) {
+      return {
+        ok: false,
+        error: useR2
+          ? 'Vidéo supérieure à 5 Go (limite maximale par fichier sur Cloudflare R2).'
+          : 'Vidéo supérieure à 50 Mo. Activez le stockage Cloudflare R2 pour téléverser des films jusqu’à 5 Go.'
+      }
+    }
     return { ok: true, cleanName: clean }
   }
   return { ok: false, error: 'Espace de stockage inconnu.' }
@@ -434,9 +442,9 @@ export function isSafeStoragePath(path, creatorUid = null) {
   const s = String(path || '').trim()
   if (!s || s.includes('..') || s.startsWith('/') || s.includes('\\')) return false
   if (creatorUid) {
-    return new RegExp(`^creator/${creatorUid}/[A-Za-z0-9._-]+$`).test(s)
+    return new RegExp(`^(r2:)?creator/${creatorUid}/[A-Za-z0-9._-]+$`).test(s)
   }
-  return /^[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+$/.test(s)
+  return /^(r2:)?[A-Za-z0-9_-]+\/[A-Za-z0-9._/-]+$/.test(s)
 }
 
 export function frAuthError(m) {

@@ -11,6 +11,7 @@ import {
   sendJson,
   validateUploadMeta
 } from '../server/supabaseServer.js'
+import { createR2UploadUrl, isR2Configured } from '../server/r2Storage.js'
 
 export default async function handler(req, res) {
   const ctx = await getSessionContext(req, res)
@@ -65,7 +66,9 @@ export default async function handler(req, res) {
     }))
     return sendJson(res, 200, {
       channel: ch.data ? { channel_name: ch.data.channel_name, bio: ch.data.bio || '', country: ch.data.country || 'Mali' } : null,
-      titles
+      titles,
+      r2Enabled: isR2Configured(),
+      maxVideoMb: isR2Configured() ? 5120 : 50
     })
   }
 
@@ -91,17 +94,25 @@ export default async function handler(req, res) {
   if (action === 'sign-upload') {
     if (!enforceRateLimit(req, res, 'studio_upload', 30, 15 * 60_000, uid)) return
     const bucket = body.bucket === 'videos' ? 'videos' : 'posters'
-    const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes)
+    const useR2 = bucket === 'videos' && isR2Configured()
+    const meta = validateUploadMeta(bucket, body.fileName, body.mime, body.sizeBytes, { useR2 })
     if (!meta.ok) return sendJson(res, 400, { error: meta.error })
 
     const prefix = safeName(body.prefix || (bucket === 'videos' ? 'vid' : 'poster')).replace(/\./g, '')
     const path = `creator/${uid}/${prefix}-${Date.now()}-${meta.cleanName}`
+
+    if (useR2) {
+      const r2 = createR2UploadUrl(path, 3600)
+      if (!r2?.signedUrl) return sendJson(res, 500, { error: 'Impossible de préparer le téléversement Cloudflare R2.' })
+      return sendJson(res, 200, { signedUrl: r2.signedUrl, path: r2.storagePath, publicUrl: null, provider: 'r2' })
+    }
+
     const { data, error } = await db.storage.from(bucket).createSignedUploadUrl(path)
     if (error || !data?.signedUrl) {
       return safeError(res, 400, 'Impossible de préparer le téléversement.', error)
     }
     const publicUrl = bucket === 'posters' ? db.storage.from('posters').getPublicUrl(path).data.publicUrl : null
-    return sendJson(res, 200, { signedUrl: data.signedUrl, path, publicUrl })
+    return sendJson(res, 200, { signedUrl: data.signedUrl, path, publicUrl, provider: 'supabase' })
   }
 
   if (action === 'save-title') {

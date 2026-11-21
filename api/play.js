@@ -7,6 +7,7 @@ import {
   safeError,
   sendJson
 } from '../server/supabaseServer.js'
+import { createR2PlaybackUrl } from '../server/r2Storage.js'
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return sendJson(res, 405, { error: 'Méthode non autorisée.' })
@@ -54,6 +55,18 @@ export default async function handler(req, res) {
       body: JSON.stringify({ titleId, episodeId })
     })
     const data = await resp.json().catch(() => ({}))
+    if (resp.ok && data?.r2Path) {
+      const r2Url = createR2PlaybackUrl(data.r2Path, 3600)
+      if (r2Url) {
+        return sendJson(res, 200, {
+          url: r2Url,
+          mime: data.mime || null,
+          ads: data.ads,
+          subtitles: Array.isArray(data.subtitles) ? data.subtitles : []
+        })
+      }
+      return sendJson(res, 503, { error: 'Le stockage vidéo Cloudflare R2 n’est pas encore activé sur le serveur.' })
+    }
     if (resp.ok && data?.url) {
       return sendJson(res, 200, {
         url: data.url,
