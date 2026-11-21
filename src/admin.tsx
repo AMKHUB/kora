@@ -43,24 +43,22 @@ export function Admin({ q }: { q: URLSearchParams }) {
   }
 
   const tabs: [string, string][] = role === 'admin'
-    ? [['stats', 'Tableau de bord'], ['titles', 'Contenus & Séries'], ['rights', 'Droits par pays'], ['users', 'Comptes & Rôles'], ['reports', 'Signalements']]
+    ? [['stats', 'Pilotage & Métriques'], ['titles', 'Métadonnées catalogue'], ['rights', 'Droits par pays'], ['users', 'Comptes & Rôles'], ['reports', 'Signalements']]
     : [['reports', 'Signalements']]
   const defaultTab = role === 'admin' ? 'stats' : 'reports'
   const tab = tabs.some(([k]) => k === q.get('t')) ? (q.get('t') as string) : defaultTab
   const id = q.get('id')
-  const presetType = q.get('type') || undefined
 
   return (
     <div className="page admin">
       <div className="page-head">
         <div>
           <h1>{role === 'admin' ? 'Espace administrateur' : 'Espace modération'}</h1>
-          <p className="mu">Ajoutez vos séries avec couverture et synopsis, gérez les droits, les créateurs et les signalements.</p>
+          <p className="mu">Pilotage de la plateforme, gestion des métadonnées, droits de diffusion, rôles utilisateurs et signalements.</p>
         </div>
         {role === 'admin' && (
           <div className="btns flush">
-            <a className="btn p" href="#/admin?t=titles&id=new&type=series"><Icon n="plus" s={18} />Nouvelle série</a>
-            <a className="btn" href="#/admin?t=titles&id=new&type=film"><Icon n="film" s={18} />Nouveau film</a>
+            <a className="btn" href="/studio/" target="_blank" rel="noopener noreferrer"><Icon n="studio" s={18} />Ouvrir Kora Studio</a>
           </div>
         )}
       </div>
@@ -72,7 +70,7 @@ export function Admin({ q }: { q: URLSearchParams }) {
       </div>
 
       {tab === 'stats' && <Stats />}
-      {tab === 'titles' && (id ? <Editor key={id + (presetType || '')} id={id} presetType={presetType} /> : <List />)}
+      {tab === 'titles' && (id && id !== 'new' ? <MetadataEditor key={id} id={id} /> : <List />)}
       {tab === 'rights' && <RightsManager />}
       {tab === 'users' && <UsersManager />}
       {tab === 'reports' && <Reports />}
@@ -564,7 +562,10 @@ function List() {
   return (
     <section className="panel">
       <div className="panel-head">
-        <h2>Catalogue ({visible.length})</h2>
+        <div>
+          <h2>Métadonnées du catalogue ({visible.length})</h2>
+          <p className="mu">Modifiez les fiches éditoriales, badges et visibilité. La mise en ligne des vidéos se fait dans l’application Kora Studio.</p>
+        </div>
         <div className="inline" style={{ margin: 0 }}>
           <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filtrer par type">
             <option value="all">Tous les types</option>
@@ -586,12 +587,12 @@ function List() {
           t.creator_id ? <span className="pill-spec">Kora Studio</span> : t.country,
           STATUS[t.status],
           <span className="acts">
-            <a className="lnk" href={`#/admin?t=titles&id=${t.id}`}>Modifier</a>
+            <a className="lnk" href={`#/admin?t=titles&id=${t.id}`}>Métadonnées</a>
             <button type="button" className="lnk" onClick={() => toggle(t)}>{t.status === 'published' ? 'Dépublier' : 'Publier'}</button>
             <button type="button" className="lnk" onClick={() => remove(t)}>Supprimer</button>
           </span>
         ])}
-        empty="Aucun contenu dans cette catégorie. Cliquez sur « Nouvelle série » pour en ajouter une."
+        empty="Aucun contenu dans cette catégorie. Les créateurs publient leurs œuvres depuis Kora Studio."
       />
     </section>
   )
@@ -603,16 +604,15 @@ type F = {
   status: string; is_trending: boolean; is_new: boolean; is_exclusive: boolean; available_from: string; available_until: string
   poster_url: string; backdrop_url: string
 }
-const blank = (presetType?: string): F => ({
-  title: '', type: presetType || 'series', year: String(new Date().getFullYear()), duration_min: presetType === 'film' ? '95' : '45',
+const blank = (): F => ({
+  title: '', type: 'series', year: String(new Date().getFullYear()), duration_min: '45',
   country: 'Mali', original_language: 'fr', age_rating: 'Tous', synopsis_short: '', synopsis_long: '', status: 'published',
   is_trending: false, is_new: true, is_exclusive: false, available_from: '', available_until: '', poster_url: '', backdrop_url: ''
 })
 
-function Editor({ id, presetType }: { id: string; presetType?: string }) {
+function MetadataEditor({ id }: { id: string }) {
   const { reloadCatalog, toast } = useApp()
-  const isNew = id === 'new'
-  const [f, setF] = useState<F>(() => blank(presetType))
+  const [f, setF] = useState<F>(blank)
   const [genres, setGenres] = useState<any[]>([])
   const [sel, setSel] = useState<number[]>([])
   const [langs, setLangs] = useState<any[]>([])
@@ -620,13 +620,6 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
   const [cast, setCast] = useState('')
   const [msg, setMsg] = useState('')
   const [busy, setBusy] = useState(false)
-  const [vid, setVid] = useState<any>(null)
-  const [eps, setEps] = useState<any[]>([])
-  const [newEpSeason, setNewEpSeason] = useState('1')
-  const [newEpTitle, setNewEpTitle] = useState('')
-  const [newEpSynopsis, setNewEpSynopsis] = useState('')
-  const [newEpDur, setNewEpDur] = useState('45')
-  const [newEpIntro, setNewEpIntro] = useState('75')
   const [pendingPoster, setPendingPoster] = useState<File | null>(null)
   const [pendingPosterPreview, setPendingPosterPreview] = useState('')
   const [pendingBackdrop, setPendingBackdrop] = useState<File | null>(null)
@@ -634,47 +627,43 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
 
   const up = (k: keyof F, v: unknown) => setF(x => ({ ...x, [k]: v }))
 
-  const load = async () => {
-    const r = await apiGet<{ genres: any[]; langs: any[]; title: any }>(`/api/admin?action=title-detail&id=${encodeURIComponent(id)}`)
-    if (!r.ok) { setMsg(r.data.error || 'Impossible de charger la fiche.'); return }
-    setGenres(r.data.genres || [])
-    setLangs(r.data.langs || [])
-    if (isNew) return
-    const t = r.data.title
-    if (!t) return setMsg('Contenu introuvable.')
-    setF({
-      title: t.title, type: t.type, year: String(t.year ?? ''), duration_min: String(t.duration_min ?? ''), country: t.country, original_language: t.original_language || 'fr', age_rating: t.age_rating,
-      synopsis_short: t.synopsis_short || '', synopsis_long: t.synopsis_long || '', status: t.status, is_trending: t.is_trending, is_new: t.is_new, is_exclusive: t.is_exclusive,
-      available_from: t.available_from || '', available_until: t.available_until || '', poster_url: t.poster_url || '', backdrop_url: t.backdrop_url || ''
+  useEffect(() => {
+    apiGet<{ genres: any[]; langs: any[]; title: any }>(`/api/admin?action=title-detail&id=${encodeURIComponent(id)}`).then(r => {
+      if (!r.ok) { setMsg(r.data.error || 'Impossible de charger les métadonnées.'); return }
+      setGenres(r.data.genres || [])
+      setLangs(r.data.langs || [])
+      const t = r.data.title
+      if (!t) { setMsg('Contenu introuvable.'); return }
+      setF({
+        title: t.title, type: t.type, year: String(t.year ?? ''), duration_min: String(t.duration_min ?? ''), country: t.country, original_language: t.original_language || 'fr', age_rating: t.age_rating,
+        synopsis_short: t.synopsis_short || '', synopsis_long: t.synopsis_long || '', status: t.status, is_trending: t.is_trending, is_new: t.is_new, is_exclusive: t.is_exclusive,
+        available_from: t.available_from || '', available_until: t.available_until || '', poster_url: t.poster_url || '', backdrop_url: t.backdrop_url || ''
+      })
+      setSel((t.title_genres || []).map((x: any) => x.genre_id))
+      setDir((t.title_people || []).filter((x: any) => x.role === 'director').map((x: any) => x.people?.name).filter(Boolean).join(', '))
+      setCast((t.title_people || []).filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people?.name).filter(Boolean).join(', '))
     })
-    setSel((t.title_genres || []).map((x: any) => x.genre_id))
-    setDir((t.title_people || []).filter((x: any) => x.role === 'director').map((x: any) => x.people?.name).filter(Boolean).join(', '))
-    setCast((t.title_people || []).filter((x: any) => x.role === 'actor').sort((a: any, b: any) => a.position - b.position).map((x: any) => x.people?.name).filter(Boolean).join(', '))
-    setVid(t.video_assets?.[0] || null)
-    const sortedSeasons = (t.seasons || []).sort((a: any, b: any) => a.number - b.number)
-    setEps(sortedSeasons.flatMap((s: any) => (s.episodes || []).sort((a: any, b: any) => a.number - b.number).map((e: any) => ({ ...e, season: s.number }))))
-  }
-  useEffect(() => { load() }, [])
+  }, [id])
 
   const uploadImageFile = async (file: File, kind: 'poster' | 'backdrop'): Promise<string | null> => {
     const sign = await apiPost<{ signedUrl: string; publicUrl: string }>('/api/admin?action=sign-upload', {
       bucket: 'posters',
-      folder: isNew ? 'covers' : id,
+      folder: id,
       kind,
       fileName: file.name,
       mime: file.type,
       sizeBytes: file.size
     })
-    if (!sign.ok || !sign.data.signedUrl) { setMsg(sign.data.error || 'Échec préparation upload.'); return null }
+    if (!sign.ok || !sign.data.signedUrl) { setMsg(sign.data.error || 'Échec préparation envoi.'); return null }
     const upRes = await uploadFileToSignedUrl(sign.data.signedUrl, file)
-    if (!upRes.ok) { setMsg(upRes.error || 'Échec upload image.'); return null }
+    if (!upRes.ok) { setMsg(upRes.error || 'Échec envoi image.'); return null }
     return sign.data.publicUrl
   }
 
   const save = async () => {
     if (!f.title.trim()) return setMsg('Le titre est obligatoire.')
     if (f.status === 'published' && !pendingPoster && !f.poster_url.trim()) {
-      return setMsg('Une page de couverture (affiche 2:3) est obligatoire pour publier un contenu sur Kora.')
+      return setMsg('Une affiche 2:3 est obligatoire pour publier un contenu sur Kora.')
     }
     setBusy(true); setMsg('')
 
@@ -697,21 +686,20 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
     }
 
     const r = await apiPost<{ id: number }>('/api/admin?action=save-title', {
-      id: isNew ? 'new' : id,
+      id,
       form: { ...f, poster_url: posterUrl, backdrop_url: backdropUrl },
       genres: sel,
       director: dir,
       cast
     })
     setBusy(false)
-    if (!r.ok) return setMsg(r.data.error || 'Impossible d’enregistrer.')
-    toast(f.type === 'series' ? 'Série enregistrée avec sa couverture et son synopsis.' : 'Contenu enregistré.', 'ok')
+    if (!r.ok) return setMsg(r.data.error || 'Impossible d’enregistrer les métadonnées.')
+    toast('Métadonnées mises à jour.', 'ok')
     reloadCatalog()
-    if (isNew && r.data.id) location.hash = `#/admin?t=titles&id=${r.data.id}`
   }
 
   const del = async () => {
-    if (!confirm('Supprimer définitivement ce contenu ?')) return
+    if (!confirm('Supprimer définitivement ce contenu et ses métadonnées ?')) return
     const r = await apiPost('/api/admin?action=delete-title', { id })
     if (!r.ok) setMsg(r.data.error || 'Erreur de suppression.')
     else {
@@ -721,63 +709,11 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
     }
   }
 
-  const addEpisode = async () => {
-    if (isNew || !newEpTitle.trim()) return
-    setBusy(true)
-    const r = await apiPost<{ season: number; number: number }>('/api/admin?action=add-episode', {
-      titleId: +id,
-      season: +newEpSeason || 1,
-      title: newEpTitle.trim(),
-      synopsis: newEpSynopsis.trim(),
-      duration_min: +newEpDur || 45,
-      intro_end_sec: +newEpIntro || 75
-    })
-    setBusy(false)
-    if (!r.ok) return setMsg(r.data.error || 'Erreur ajout épisode.')
-    setNewEpTitle(''); setNewEpSynopsis('')
-    toast(`Épisode S${r.data.season}E${r.data.number} ajouté.`, 'ok')
-    reloadCatalog()
-    load()
-  }
-
-  const deleteEpisode = async (epId: number) => {
-    if (!confirm('Supprimer cet épisode ?')) return
-    await apiPost('/api/admin?action=delete-episode', { id: epId })
-    toast('Épisode supprimé.', 'info')
-    reloadCatalog()
-    load()
-  }
-
   const pickImage = (file: File | undefined, kind: 'poster' | 'backdrop') => {
     if (!file) return
     const preview = URL.createObjectURL(file)
     if (kind === 'poster') { setPendingPoster(file); setPendingPosterPreview(preview) }
     else { setPendingBackdrop(file); setPendingBackdropPreview(preview) }
-  }
-
-  const uploadVideo = async (file: File | undefined, target: { title_id?: number; episode_id?: number }) => {
-    if (!file) return
-    setBusy(true); setMsg(`Envoi de ${file.name} (${Math.round(file.size / 1048576)} Mo), ne fermez pas cette page…`)
-    const sign = await apiPost<{ signedUrl: string; path: string }>('/api/admin?action=sign-upload', {
-      bucket: 'videos',
-      folder: id,
-      kind: target.episode_id ? `ep-${target.episode_id}` : 'film',
-      fileName: file.name,
-      mime: file.type,
-      sizeBytes: file.size
-    })
-    if (!sign.ok || !sign.data.signedUrl) { setBusy(false); return setMsg(sign.data.error || 'Échec préparation upload vidéo.') }
-    const upRes = await uploadFileToSignedUrl(sign.data.signedUrl, file)
-    if (!upRes.ok) { setBusy(false); return setMsg(upRes.error || 'Échec upload vidéo.') }
-    const reg = await apiPost('/api/admin?action=register-video', {
-      ...target,
-      storage_path: sign.data.path,
-      size_bytes: file.size,
-      mime: file.type
-    })
-    setBusy(false)
-    setMsg(reg.ok ? 'Vidéo envoyée, prête à la lecture.' : (reg.data.error || 'Erreur enregistrement vidéo.'))
-    load()
   }
 
   const chk = (k: 'is_trending' | 'is_new' | 'is_exclusive', t: string) => (
@@ -789,10 +725,11 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
 
   return (
     <div className="panel form">
-      <a className="lnk" href="#/admin?t=titles">← Retour aux contenus</a>
-      <h2>{isNew ? (f.type === 'series' ? 'Ajouter une nouvelle série' : 'Nouveau contenu') : f.title}</h2>
+      <a className="lnk" href="#/admin?t=titles">← Retour aux métadonnées du catalogue</a>
+      <h2>Métadonnées · {f.title || `#${id}`}</h2>
+      <p className="mu">Modifiez ici les métadonnées éditoriales, les visuels et la fenêtre de disponibilité. Les fichiers vidéo, épisodes et sous-titres sont gérés dans l’application séparée <a className="lnk" href="/studio/" target="_blank" rel="noopener noreferrer">Kora Studio</a>.</p>
 
-      <label>Titre<input className="field" value={f.title} onChange={e => up('title', e.target.value)} placeholder="Ex. Les Chroniques de Bamako" /></label>
+      <label>Titre<input className="field" value={f.title} onChange={e => up('title', e.target.value)} /></label>
       <div className="inline">
         <label>Type<select value={f.type} onChange={e => up('type', e.target.value)}>{TYPES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
         <label>Année<input className="field narrow" inputMode="numeric" value={f.year} onChange={e => up('year', e.target.value)} /></label>
@@ -803,24 +740,24 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
 
       <div className="cover-upload-grid">
         <div className="cover-box">
-          <strong>Page de couverture (Affiche 2:3 · obligatoire)</strong>
+          <strong>Affiche 2:3 (Couverture)</strong>
           {posterPreview ? <img className="thumb" src={posterPreview} alt="Aperçu couverture" /> : <div className="thumb placeholder">Aucune affiche</div>}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => pickImage(e.target.files?.[0], 'poster')} />
-          <input className="field" value={f.poster_url} onChange={e => up('poster_url', e.target.value)} placeholder="…ou coller une URL d’image" aria-label="URL de la couverture" />
+          <input className="field" value={f.poster_url} onChange={e => up('poster_url', e.target.value)} placeholder="URL de l’affiche" aria-label="URL de la couverture" />
         </div>
         <div className="cover-box">
-          <strong>Bannière large (16:9, facultatif)</strong>
+          <strong>Bannière grand écran 16:9</strong>
           {backdropPreview ? <img className="thumb wide-thumb" src={backdropPreview} alt="Aperçu bannière" /> : <div className="thumb wide-thumb placeholder">Aucune bannière</div>}
           <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => pickImage(e.target.files?.[0], 'backdrop')} />
-          <input className="field" value={f.backdrop_url} onChange={e => up('backdrop_url', e.target.value)} placeholder="…ou coller une URL de bannière" aria-label="URL de la bannière" />
+          <input className="field" value={f.backdrop_url} onChange={e => up('backdrop_url', e.target.value)} placeholder="URL de la bannière" aria-label="URL de la bannière" />
         </div>
       </div>
 
       <label>Accroche / Synopsis court (max 180 car.)
-        <input className="field" maxLength={180} value={f.synopsis_short} onChange={e => up('synopsis_short', e.target.value)} placeholder="Résumé court affiché en une de l’accueil…" />
+        <input className="field" maxLength={180} value={f.synopsis_short} onChange={e => up('synopsis_short', e.target.value)} />
       </label>
       <label>Synopsis complet
-        <textarea className="field" rows={5} value={f.synopsis_long} onChange={e => up('synopsis_long', e.target.value)} placeholder="Racontez l’histoire complète de la série ou du film…" />
+        <textarea className="field" rows={4} value={f.synopsis_long} onChange={e => up('synopsis_long', e.target.value)} />
       </label>
 
       <div className="inline">
@@ -841,186 +778,11 @@ function Editor({ id, presetType }: { id: string; presetType?: string }) {
       </div>
       <div className="btns">
         <button type="button" className="btn p" disabled={busy} onClick={save}>
-          {busy ? 'Enregistrement…' : isNew ? 'Créer et enregistrer' : 'Enregistrer les modifications'}
+          {busy ? 'Enregistrement…' : 'Enregistrer les métadonnées'}
         </button>
-        {!isNew && <button type="button" className="btn danger" disabled={busy} onClick={del}>Supprimer</button>}
+        <button type="button" className="btn danger" disabled={busy} onClick={del}>Supprimer du catalogue</button>
       </div>
       {msg && <p role="status">{msg}</p>}
-
-      {isNew ? (
-        <p className="mu">Enregistrez d’abord cette fiche pour ajouter les saisons, épisodes et fichiers vidéo.</p>
-      ) : (
-        <>
-          <div className="divider" />
-          {f.type === 'series' ? (
-            <>
-              <h3>Saisons & Épisodes ({eps.length})</h3>
-              <div className="inline">
-                <label>Saison<input className="field narrow" inputMode="numeric" value={newEpSeason} onChange={e => setNewEpSeason(e.target.value)} /></label>
-                <label>Titre de l’épisode<input className="field" value={newEpTitle} onChange={e => setNewEpTitle(e.target.value)} placeholder="Ex. Épisode 1 — Le départ" /></label>
-                <label>Durée (min)<input className="field narrow" inputMode="numeric" value={newEpDur} onChange={e => setNewEpDur(e.target.value)} /></label>
-                <label>Fin intro (s)<input className="field narrow" inputMode="numeric" value={newEpIntro} onChange={e => setNewEpIntro(e.target.value)} /></label>
-              </div>
-              <label>Synopsis de l’épisode
-                <textarea className="field" rows={2} value={newEpSynopsis} onChange={e => setNewEpSynopsis(e.target.value)} placeholder="Résumé de cet épisode…" />
-              </label>
-              <div className="btns">
-                <button type="button" className="btn p" disabled={busy || !newEpTitle.trim()} onClick={addEpisode}>
-                  <Icon n="plus" s={18} />Ajouter l’épisode
-                </button>
-              </div>
-              <ol className="eps">
-                {eps.map(e => (
-                  <li key={e.id}>
-                    <span className="ep-num">S{e.season}.{e.number}</span>
-                    <div className="ep-body">
-                      <strong>{e.title} ({e.duration_min} min)</strong>
-                      {e.synopsis && <p className="mu">{e.synopsis}</p>}
-                      <small className="mu">{e.video_assets?.length ? 'Vidéo prête en ligne' : 'Aucune vidéo téléversée'}</small>
-                    </div>
-                    <input type="file" accept="video/mp4,video/webm,video/quicktime" disabled={busy} onChange={ev => uploadVideo(ev.target.files?.[0], { episode_id: e.id })} aria-label={`Vidéo de l’épisode ${e.number}`} />
-                    <button type="button" className="lnk" onClick={() => deleteEpisode(e.id)}>Supprimer</button>
-                  </li>
-                ))}
-              </ol>
-            </>
-          ) : (
-            <>
-              <h3>Fichier vidéo du film</h3>
-              <label>Vidéo (MP4, WebM ou MOV)
-                <input type="file" accept="video/mp4,video/webm,video/quicktime" disabled={busy} onChange={e => uploadVideo(e.target.files?.[0], { title_id: +id })} />
-              </label>
-              <p className="mu">{vid ? `Vidéo en ligne (${Math.round((vid.size_bytes || 0) / 1048576)} Mo).` : 'Aucune vidéo téléversée pour le moment.'}</p>
-            </>
-          )}
-          <div className="divider" />
-          <SubtitleManager titleId={+id} episodes={f.type === 'series' ? eps : []} />
-        </>
-      )}
-    </div>
-  )
-}
-
-const SUB_LANGS: [string, string][] = [
-  ['fr', 'Français'], ['en', 'English'], ['bm', 'Bambara'], ['wo', 'Wolof'], ['ff', 'Peul'], ['ar', 'Arabe'], ['ja', 'Japonais']
-]
-
-function SubtitleManager({ titleId, episodes }: { titleId: number; episodes: any[] }) {
-  const { toast } = useApp()
-  const [epId, setEpId] = useState<string>(episodes[0] ? String(episodes[0].id) : '')
-  const [lang, setLang] = useState('fr')
-  const [offsetMs, setOffsetMs] = useState('0')
-  const [tracks, setTracks] = useState<any[]>([])
-  const [busy, setBusy] = useState(false)
-  const [status, setStatus] = useState('')
-
-  const targetEpId = episodes.length && epId ? Number(epId) : undefined
-
-  const load = async () => {
-    const qs = targetEpId ? `episodeId=${targetEpId}` : `titleId=${titleId}`
-    const r = await apiGet<{ tracks: any[] }>(`/api/subtitles?${qs}`)
-    if (r.ok) setTracks(r.data.tracks || [])
-  }
-
-  useEffect(() => {
-    if (episodes.length && !epId) setEpId(String(episodes[0].id))
-  }, [episodes.length])
-
-  useEffect(() => { load() }, [titleId, targetEpId])
-
-  const uploadSubFile = async (file: File | undefined) => {
-    if (!file) return
-    setBusy(true); setStatus('Conversion et synchronisation de la piste…')
-    const content = await file.text()
-    const label = SUB_LANGS.find(([c]) => c === lang)?.[1] || lang.toUpperCase()
-    const r = await apiPost<{ cues: number }>('/api/subtitles?action=save', {
-      titleId,
-      episodeId: targetEpId,
-      languageCode: lang,
-      languageLabel: label,
-      content,
-      offsetMs: Number(offsetMs) || 0,
-      source: 'upload'
-    })
-    setBusy(false)
-    if (!r.ok) { setStatus(r.data.error || 'Fichier sous-titre invalide.'); return }
-    setStatus(`Piste ${label} synchronisée (${r.data.cues} répliques).`)
-    toast(`Sous-titres ${label} enregistrés.`, 'ok')
-    load()
-  }
-
-  const generateAiSubs = async () => {
-    setBusy(true); setStatus('Analyse de la voix et génération des sous-titres synchronisés (IA)…')
-    const label = SUB_LANGS.find(([c]) => c === lang)?.[1] || 'Français'
-    const r = await apiPost<{ cues: number }>('/api/subtitles?action=generate', {
-      titleId,
-      episodeId: targetEpId,
-      languageCode: lang,
-      languageLabel: label
-    })
-    setBusy(false)
-    if (!r.ok) { setStatus(r.data.error || 'Synchronisation IA indisponible.'); return }
-    setStatus(`Sous-titres ${label} synchronisés à la voix par IA (${r.data.cues} répliques) !`)
-    toast(`Sous-titres ${label} générés et synchronisés !`, 'ok')
-    load()
-  }
-
-  const removeTrack = async (id: number) => {
-    const r = await apiPost('/api/subtitles?action=delete', { id })
-    if (r.ok) { toast('Piste supprimée.', 'info'); load() }
-  }
-
-  return (
-    <div className="form" style={{ maxWidth: 'none' }}>
-      <h3>Sous-titres synchronisés avec la voix (WebVTT / SRT / IA)</h3>
-      <p className="mu">Importez un fichier de sous-titres (.vtt ou .srt), ou lancez la transcription vocale IA pour caler automatiquement les répliques sur le son de la vidéo.</p>
-
-      <div className="inline">
-        {episodes.length > 0 && (
-          <label>Épisode cible
-            <select value={epId} onChange={e => setEpId(e.target.value)}>
-              {episodes.map(e => <option key={e.id} value={e.id}>S{e.season}E{e.number} — {e.title}</option>)}
-            </select>
-          </label>
-        )}
-        <label>Langue
-          <select value={lang} onChange={e => setLang(e.target.value)}>
-            {SUB_LANGS.map(([c, l]) => <option key={c} value={c}>{l}</option>)}
-          </select>
-        </label>
-        <label>Décalage voix (ms)
-          <input className="field narrow" inputMode="numeric" value={offsetMs} onChange={e => setOffsetMs(e.target.value)} placeholder="0" />
-        </label>
-      </div>
-
-      <div className="btns">
-        <label className="btn" style={{ cursor: 'pointer' }}>
-          <Icon n="upload" s={16} />
-          <span>Importer .vtt / .srt</span>
-          <input type="file" accept=".vtt,.srt,text/vtt,text/plain" disabled={busy} style={{ display: 'none' }} onChange={e => uploadSubFile(e.target.files?.[0])} />
-        </label>
-        <button type="button" className="btn p" disabled={busy} onClick={generateAiSubs}>
-          <Icon n="sparkles" s={16} />
-          {busy ? 'Synchronisation en cours…' : 'Synchroniser automatiquement depuis la voix (IA)'}
-        </button>
-      </div>
-
-      {status && <p className="status-box" role="status">{status}</p>}
-
-      {tracks.length > 0 ? (
-        <Table
-          head={['Langue', 'Source', 'Calage voix', 'Actions']}
-          rows={tracks.map(tr => [
-            tr.language_label,
-            tr.source === 'ai_gemini' ? 'IA Gemini (voix)' : tr.source === 'ai_whisper' ? 'IA Whisper (voix)' : 'Fichier .vtt/.srt',
-            `${tr.offset_ms >= 0 ? '+' : ''}${(tr.offset_ms / 1000).toFixed(2)} s`,
-            <button type="button" className="lnk" onClick={() => removeTrack(tr.id)}>Supprimer</button>
-          ])}
-          empty="Aucune piste."
-        />
-      ) : (
-        <p className="mu">Aucune piste de sous-titres enregistrée pour cette vidéo.</p>
-      )}
     </div>
   )
 }

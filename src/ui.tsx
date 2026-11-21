@@ -287,7 +287,14 @@ export function Card({ item, rank, progressSec }: { item: Item; rank?: number; p
       <div className="card-media">
         <Poster item={item} />
         {item.quality === '4K' && <span className="q-badge">4K</span>}
-        <span className="card-play" aria-hidden="true"><Icon n="play" s={16} /></span>
+        {item.badge && !rank && <span className="card-tag">{item.badge}</span>}
+        <div className="card-hover-veil" aria-hidden="true">
+          <span className="card-play"><Icon n="play" s={16} /></span>
+          <span className="card-hover-meta">
+            <strong>{item.title}</strong>
+            <small>{item.year} · {item.age} · {item.genres[0] || 'Cinéma'}</small>
+          </span>
+        </div>
         {pct > 0 && (
           <span className="card-prog" aria-label={`Regardé à ${pct} %`}>
             <span style={{ width: `${pct}%` }} />
@@ -316,30 +323,34 @@ export function Row({ title, ids, ranked, showProgress, action }: {
 
   const nudge = (dir: number) => {
     const el = scroller.current
-    if (el) el.scrollBy({ left: dir * Math.max(320, el.clientWidth * 0.72), behavior: 'smooth' })
+    if (el) el.scrollBy({ left: dir * Math.max(360, el.clientWidth * 0.78), behavior: 'smooth' })
   }
 
   return (
     <section className="rowsec">
       <div className="row-head">
-        <h2>{title}</h2>
-        <div className="row-tools">
-          {action && <a className="row-more" href={action.href}>{action.label}</a>}
-          <div className="row-arrows">
-            <button type="button" className="icon-btn" onClick={() => nudge(-1)} aria-label={`Défiler ${title} vers la gauche`}><Icon n="chevL" s={18} /></button>
-            <button type="button" className="icon-btn" onClick={() => nudge(1)} aria-label={`Défiler ${title} vers la droite`}><Icon n="chevR" s={18} /></button>
-          </div>
-        </div>
+        <h2>
+          {title}
+          {action && <a className="row-more" href={action.href}>{action.label} ›</a>}
+        </h2>
       </div>
-      <div className="row" ref={scroller}>
-        {list.map((i, idx) => (
-          <Card
-            key={i.id}
-            item={i}
-            rank={ranked ? idx + 1 : undefined}
-            progressSec={showProgress ? profile.hist[i.id] : undefined}
-          />
-        ))}
+      <div className="row-wrap">
+        <button type="button" className="row-paddle left" onClick={() => nudge(-1)} aria-label={`Défiler ${title} vers la gauche`}>
+          <Icon n="chevL" s={24} />
+        </button>
+        <div className="row" ref={scroller}>
+          {list.map((i, idx) => (
+            <Card
+              key={i.id}
+              item={i}
+              rank={ranked ? idx + 1 : undefined}
+              progressSec={showProgress ? profile.hist[i.id] : undefined}
+            />
+          ))}
+        </div>
+        <button type="button" className="row-paddle right" onClick={() => nudge(1)} aria-label={`Défiler ${title} vers la droite`}>
+          <Icon n="chevR" s={24} />
+        </button>
       </div>
     </section>
   )

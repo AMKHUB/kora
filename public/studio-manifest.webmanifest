@@ -1,0 +1,18 @@
+{
+  "name": "Kora Studio",
+  "short_name": "Kora Studio",
+  "description": "Application créateurs séparée : mettez en ligne vos films, séries, épisodes et suivez vos performances.",
+  "start_url": "/studio/",
+  "scope": "/studio/",
+  "display": "standalone",
+  "background_color": "#0E0E11",
+  "theme_color": "#0E0E11",
+  "icons": [
+    {
+      "src": "/studio-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

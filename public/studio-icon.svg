@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="ks-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1E1E26"/>
+      <stop offset="100%" stop-color="#0D0D11"/>
+    </linearGradient>
+    <linearGradient id="ks-ring" x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F2C334"/>
+      <stop offset="55%" stop-color="#FE2C55"/>
+      <stop offset="100%" stop-color="#2F9E3C"/>
+    </linearGradient>
+    <linearGradient id="ks-play" x1="22" y1="18" x2="48" y2="46" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8D866"/>
+      <stop offset="100%" stop-color="#F2C334"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#ks-bg)" stroke="url(#ks-ring)" stroke-width="2.5"/>
+  <!-- Barre créateur façon clap / lentille studio -->
+  <path d="M16 19.5C16 17.567 17.567 16 19.5 16H44.5C46.433 16 48 17.567 48 19.5V23H16V19.5Z" fill="#2A2A35"/>
+  <path d="M20 16L25 23H20.5L16 16.8V16H20Z" fill="#2F9E3C"/>
+  <path d="M31 16L36 23H31.5L26.5 16H31Z" fill="#F2C334"/>
+  <path d="M42 16L47 23H42.5L37.5 16H42Z" fill="#FE2C55"/>
+  <!-- Corps clap + prisme lecture créateur -->
+  <rect x="16" y="24" width="32" height="24" rx="5" fill="#17171D" stroke="rgba(255,255,255,0.14)" stroke-width="1.5"/>
+  <path d="M27.5 30.2C27.5 29.05 28.75 28.34 29.74 28.92L39.4 34.72C40.36 35.3 40.36 36.7 39.4 37.28L29.74 43.08C28.75 43.66 27.5 42.95 27.5 41.8V30.2Z" fill="url(#ks-play)"/>
+  <!-- Voyant REC studio -->
+  <circle cx="48" cy="48" r="5" fill="#0D0D11"/>
+  <circle cx="48" cy="48" r="3" fill="#FE2C55"/>
+</svg>

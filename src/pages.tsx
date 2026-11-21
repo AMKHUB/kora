@@ -103,20 +103,15 @@ export function Home() {
             <span className="pill-accent">Cinéma & Séries d’Afrique</span>
             <h1>La maison du cinéma malien, africain et de la diaspora</h1>
             <p className="mu">
-              Un écrin éditorial dédié aux grandes histoires du continent. Ajoutez vos séries avec page de couverture, synopsis, épisodes et sous-titres synchronisés depuis l’Espace Administrateur ou Kora Studio.
+              Un écrin éditorial dédié aux grandes histoires du continent. Publiez vos séries, films, couvertures, épisodes et sous-titres synchronisés depuis l’application dédiée Kora Studio.
             </p>
             <div className="btns" style={{ justifyContent: 'center' }}>
               {!session ? (
                 <a className="btn p" href="#/connexion"><Icon n="user" s={18} />Se connecter / Créer un compte</a>
               ) : (
-                <>
-                  {role === 'admin' && (
-                    <a className="btn p" href="#/admin?t=titles&id=new&type=series"><Icon n="plus" s={18} />Ajouter une série (Admin)</a>
-                  )}
-                  <a className={'btn' + (role !== 'admin' ? ' p' : '')} href="/studio/"><Icon n="studio" s={18} />Publier sur Kora Studio</a>
-                </>
+                <a className="btn p" href="/studio/" target="_blank" rel="noopener noreferrer"><Icon n="studio" s={18} />Ouvrir Kora Studio</a>
               )}
-              <a className="btn" href="/studio/"><Icon n="film" s={18} />Découvrir Kora Studio</a>
+              <a className="btn" href="/studio/" target="_blank" rel="noopener noreferrer"><Icon n="film" s={18} />Découvrir Kora Studio</a>
             </div>
             <div className="empty-pillars">
               <div className="pillar-card">
@@ -222,77 +217,78 @@ export function Home() {
         )}
       </header>
 
-      <div className="home-bar">
-        <div className="chips" role="tablist" aria-label="Filtres rapides">
-          {HOME_FILTERS.map(f => (
-            <button
-              key={f.id}
-              type="button"
-              role="tab"
-              aria-selected={filter === f.id}
-              className={'chip' + (filter === f.id ? ' on' : '')}
-              onClick={() => setFilter(f.id)}
-            >
-              {f.label}
-            </button>
-          ))}
+      <div className="home-shelves">
+        <div className="home-bar">
+          <div className="chips" role="tablist" aria-label="Filtres rapides">
+            {HOME_FILTERS.map(f => (
+              <button
+                key={f.id}
+                type="button"
+                role="tab"
+                aria-selected={filter === f.id}
+                className={'chip' + (filter === f.id ? ' on' : '')}
+                onClick={() => setFilter(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+          {profile.kid && <span className="kid-banner"><Icon n="shield" s={16} />Mode Enfant actif (Tous publics & 7+)</span>}
         </div>
-        {profile.kid && <span className="kid-banner"><Icon n="shield" s={16} />Mode Enfant actif (Tous publics & 7+)</span>}
-      </div>
 
-      {filter !== 'all' ? (
-        <section className="page">
-          <h2>{HOME_FILTERS.find(f => f.id === filter)?.label} ({filteredItems.length})</h2>
-          {!filteredItems.length && (
-            <div className="empty-box">
-              <p className="mu">
-                {filter === 'serie'
-                  ? 'Aucune série n’est encore publiée. L’administrateur ou les créateurs peuvent ajouter leurs propres séries avec couverture et synopsis.'
-                  : 'Aucun titre dans cette sélection pour ce profil.'}
-              </p>
-              {filter === 'serie' && (
-                <div className="btns">
-                  <a className="btn p" href="/studio/"><Icon n="studio" s={18} />Publier sur Kora Studio</a>
-                  {role === 'admin' && <a className="btn" href="#/admin?t=titles&id=new&type=series"><Icon n="plus" s={18} />Ajouter une série (Admin)</a>}
-                </div>
-              )}
-            </div>
-          )}
-          <div className="grid flush">{filteredItems.map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
-        </section>
-      ) : (
-        <>
-          <Row title="Continuer à regarder" ids={cont} showProgress />
-          <Row title="Top 10 au Mali" ids={cat.rows.top10 || []} ranked />
-          <Row title="Tendances au Mali" ids={cat.rows.trending || []} action={{ label: 'Tout Mali', href: '#/categories/pays/Mali' }} />
-          <Row title="Nouveautés" ids={cat.rows.new || []} />
-          <Row title="Recommandés pour vous" ids={reco} />
-          <Row title="Séries originales & populaires" ids={cat.rows.series || []} />
-          <Row title="Films maliens" ids={cat.rows.malifilms || []} />
-          <Row title="Populaire en Afrique" ids={cat.rows.africa || []} />
-          <Row title="Documentaires" ids={cat.rows.docs || []} action={{ label: 'Tous les docs', href: '#/categories/genre/Documentaire' }} />
-          <Row title="Courts-métrages & Animation" ids={cat.rows.shorts || []} />
-          <Row title="Classiques restaurés du cinéma africain" ids={cat.rows.classics || []} />
-          <Row title="Sélection de la semaine" ids={cat.rows.pick || []} />
-          {src && (
-            <Row
-              title={`Parce que vous avez regardé ${src.title}`}
-              ids={items.filter(i => i.id !== src.id && i.genres.some(g => src.genres.includes(g))).map(i => i.id)}
-            />
-          )}
-
-          {!isPremium && !profile.kid && (
-            <section className="promo-strip">
-              <div>
-                <span className="pill-accent">Kora Premium & Famille</span>
-                <h2>Le cinéma africain sans publicité, jusqu’en 4K HDR</h2>
-                <p className="mu">À partir de 2 500 FCFA / mois. Paiement simple par Orange Money, Moov Money, Wave ou carte bancaire.</p>
+        {filter !== 'all' ? (
+          <section className="page flush-top">
+            <h2>{HOME_FILTERS.find(f => f.id === filter)?.label} ({filteredItems.length})</h2>
+            {!filteredItems.length && (
+              <div className="empty-box">
+                <p className="mu">
+                  {filter === 'serie'
+                    ? 'Aucune série n’est encore publiée. Rendez-vous sur l’application Kora Studio pour mettre en ligne vos séries.'
+                    : 'Aucun titre dans cette sélection pour ce profil.'}
+                </p>
+                {filter === 'serie' && (
+                  <div className="btns">
+                    <a className="btn p" href="/studio/" target="_blank" rel="noopener noreferrer"><Icon n="studio" s={18} />Publier sur Kora Studio</a>
+                  </div>
+                )}
               </div>
-              <a className="btn p" href="#/abonnement"><Icon n="crown" s={18} />Voir les formules</a>
-            </section>
-          )}
-        </>
-      )}
+            )}
+            <div className="grid flush">{filteredItems.map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
+          </section>
+        ) : (
+          <>
+            <Row title="Continuer à regarder" ids={cont} showProgress />
+            <Row title="Top 10 au Mali" ids={cat.rows.top10 || []} ranked />
+            <Row title="Tendances au Mali" ids={cat.rows.trending || []} action={{ label: 'Tout explorer', href: '#/categories/pays/Mali' }} />
+            <Row title="Nouveautés" ids={cat.rows.new || []} />
+            <Row title="Recommandés pour vous" ids={reco} />
+            <Row title="Séries originales & populaires" ids={cat.rows.series || []} />
+            <Row title="Films maliens" ids={cat.rows.malifilms || []} />
+            <Row title="Populaire en Afrique" ids={cat.rows.africa || []} />
+            <Row title="Documentaires" ids={cat.rows.docs || []} action={{ label: 'Tout voir', href: '#/categories/genre/Documentaire' }} />
+            <Row title="Courts-métrages & Animation" ids={cat.rows.shorts || []} />
+            <Row title="Classiques restaurés du cinéma africain" ids={cat.rows.classics || []} />
+            <Row title="Sélection de la semaine" ids={cat.rows.pick || []} />
+            {src && (
+              <Row
+                title={`Parce que vous avez regardé ${src.title}`}
+                ids={items.filter(i => i.id !== src.id && i.genres.some(g => src.genres.includes(g))).map(i => i.id)}
+              />
+            )}
+
+            {!isPremium && !profile.kid && (
+              <section className="promo-strip">
+                <div>
+                  <span className="pill-accent">Kora Premium & Famille</span>
+                  <h2>Le cinéma africain sans publicité, jusqu’en 4K HDR</h2>
+                  <p className="mu">À partir de 2 500 FCFA / mois. Paiement simple par Orange Money, Moov Money, Wave ou carte bancaire.</p>
+                </div>
+                <a className="btn p" href="#/abonnement"><Icon n="crown" s={18} />Voir les formules</a>
+              </section>
+            )}
+          </>
+        )}
+      </div>
 
       <Footer />
     </>

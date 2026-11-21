@@ -19,14 +19,22 @@ function useRoute() {
   return { seg: p.split('/').filter(Boolean), q: new URLSearchParams(q) }
 }
 
-const PUBLIC_NAV: [string, string, string][] = [
+const TOP_LINKS: [string, string, string][] = [
+  ['', 'Accueil', '#/'],
+  ['serie', 'Séries', '#/categories/type/serie'],
+  ['film', 'Films', '#/categories/type/film'],
+  ['doc', 'Documentaires', '#/categories/type/doc'],
+  ['categories', 'Explorer', '#/categories']
+]
+
+const MOBILE_PUBLIC: [string, string, string][] = [
   ['', 'Accueil', 'home'],
   ['recherche', 'Recherche', 'search'],
   ['categories', 'Explorer', 'grid'],
   ['connexion', 'Connexion', 'user']
 ]
 
-const MEMBER_NAV: [string, string, string][] = [
+const MOBILE_MEMBER: [string, string, string][] = [
   ['', 'Accueil', 'home'],
   ['recherche', 'Recherche', 'search'],
   ['categories', 'Explorer', 'grid'],
@@ -57,83 +65,152 @@ function Consent() {
   )
 }
 
-function Sidebar() {
+function TopNav() {
   const { seg } = useRoute()
   const { session, profile, role, unreadCount, isPremium, st, setTheme } = useApp()
+  const [scrolled, setScrolled] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchVal, setSearchVal] = useState('')
   const cur = seg[0] || ''
-  const nav = session ? MEMBER_NAV : PUBLIC_NAV
+  const subKind = seg[1] || ''
+  const subVal = seg[2] || ''
+
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 24)
+    onScroll()
+    addEventListener('scroll', onScroll, { passive: true })
+    return () => removeEventListener('scroll', onScroll)
+  }, [])
 
   const cycleTheme = () => {
     setTheme(st.theme === 'dark' ? 'black' : st.theme === 'black' ? 'light' : 'dark')
   }
 
-  return (
-    <nav className="nav" aria-label="Navigation principale">
-      <a className="brand" href="#/" aria-label="Kora, accueil">
-        <BrandLogo height={34} />
-      </a>
+  const submitQuickSearch = (e: React.FormEvent) => {
+    e.preventDefault()
+    const clean = searchVal.trim()
+    location.hash = clean ? `#/recherche?q=${encodeURIComponent(clean)}` : '#/recherche'
+    setSearchOpen(false)
+  }
 
-      <div className="nav-links">
-        {nav.map(([k, t, i]) => (
+  const isTopActive = (key: string) => {
+    if (key === '') return cur === ''
+    if (key === 'categories') return cur === 'categories' && subKind !== 'type'
+    return cur === 'categories' && subKind === 'type' && subVal === key
+  }
+
+  const mobileNav = session ? MOBILE_MEMBER : MOBILE_PUBLIC
+
+  return (
+    <>
+      <header className={'topbar' + (scrolled || cur !== '' ? ' scrolled' : '')}>
+        <div className="topbar-left">
+          <a className="brand" href="#/" aria-label="Kora, accueil">
+            <BrandLogo height={32} />
+          </a>
+
+          <nav className="topbar-links" aria-label="Navigation principale">
+            {TOP_LINKS.map(([k, label, href]) => (
+              <a
+                key={k}
+                href={href}
+                className={isTopActive(k) ? 'on' : ''}
+                aria-current={isTopActive(k) ? 'page' : undefined}
+              >
+                {label}
+              </a>
+            ))}
+            {session && (
+              <a
+                href="#/ma-liste"
+                className={cur === 'ma-liste' ? 'on' : ''}
+                aria-current={cur === 'ma-liste' ? 'page' : undefined}
+              >
+                Ma liste
+              </a>
+            )}
+          </nav>
+        </div>
+
+        <div className="topbar-right">
+          {searchOpen ? (
+            <form className="topbar-search" onSubmit={submitQuickSearch}>
+              <Icon n="search" s={17} />
+              <input
+                type="search"
+                autoFocus
+                value={searchVal}
+                onChange={e => setSearchVal(e.target.value)}
+                onBlur={() => { if (!searchVal.trim()) setSearchOpen(false) }}
+                placeholder="Titres, genres, pays…"
+                aria-label="Rechercher sur Kora"
+              />
+            </form>
+          ) : (
+            <button type="button" className="icon-btn" onClick={() => setSearchOpen(true)} aria-label="Rechercher">
+              <Icon n="search" s={19} />
+            </button>
+          )}
+
+          {session && (
+            <a className="topbar-pill" href="#/abonnement">
+              <Icon n="crown" s={15} />
+              <span>{isPremium ? 'Premium' : 'Offres'}</span>
+            </a>
+          )}
+
+          <a className="topbar-pill studio-link" href="/studio/" target="_blank" rel="noopener noreferrer" title="Ouvrir l’application Kora Studio">
+            <Icon n="studio" s={15} />
+            <span>Kora Studio</span>
+          </a>
+
+          {session && (role === 'admin' || role === 'moderator') && (
+            <a className={'topbar-pill' + (cur === 'admin' ? ' on' : '')} href="#/admin">
+              <Icon n="shield" s={15} />
+              <span>{role === 'admin' ? 'Admin' : 'Modération'}</span>
+            </a>
+          )}
+
+          {session && (
+            <a className="icon-btn notif-btn" href="#/parametres" aria-label="Notifications et paramètres">
+              <Icon n="bell" s={19} />
+              {unreadCount > 0 && <span className="top-dot" aria-label={`${unreadCount} notifications non lues`} />}
+            </a>
+          )}
+
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={cycleTheme}
+            title={`Thème : ${st.theme === 'dark' ? 'Sombre' : st.theme === 'black' ? 'Cinéma OLED' : 'Clair'}`}
+            aria-label="Changer de thème"
+          >
+            <Icon n={st.theme === 'light' ? 'sun' : 'moon'} s={18} />
+          </button>
+
+          {session ? (
+            <a className="topbar-profile" href="#/profil" aria-label={`Profil actif : ${profile.name}`}>
+              <ProfileAvatar profile={profile} size={32} />
+              <span className="topbar-prof-name">{profile.name}</span>
+            </a>
+          ) : (
+            <a className="btn p topbar-login" href="#/connexion">
+              Se connecter
+            </a>
+          )}
+        </div>
+      </header>
+
+      <nav className="mobile-dock" aria-label="Navigation mobile">
+        {mobileNav.map(([k, t, i]) => (
           <a key={k} href={`#/${k}`} className={cur === k ? 'on' : ''} aria-current={cur === k ? 'page' : undefined}>
             <Icon n={i} s={20} />
             <span>{t}</span>
             {session && k === 'profil' && unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
           </a>
         ))}
-
-        {session && (
-          <>
-            <a href="#/parametres" className={'nav-extra' + (cur === 'parametres' ? ' on' : '')} aria-current={cur === 'parametres' ? 'page' : undefined}>
-              <Icon n="gear" s={20} />
-              <span>Paramètres</span>
-              {unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
-            </a>
-            <a href="#/abonnement" className={'nav-extra' + (cur === 'abonnement' ? ' on' : '')} aria-current={cur === 'abonnement' ? 'page' : undefined}>
-              <Icon n="crown" s={20} />
-              <span>{isPremium ? 'Mon offre' : 'Premium'}</span>
-            </a>
-          </>
-        )}
-
-        <a href="/studio/" className="nav-extra">
-          <Icon n="studio" s={20} />
-          <span>Kora Studio</span>
-        </a>
-
-        {session && (role === 'admin' || role === 'moderator') && (
-          <a href="#/admin" className={'nav-extra' + (cur === 'admin' ? ' on' : '')} aria-current={cur === 'admin' ? 'page' : undefined}>
-            <Icon n="shield" s={20} />
-            <span>{role === 'admin' ? 'Admin' : 'Modération'}</span>
-          </a>
-        )}
-      </div>
-
-      <div className="nav-foot">
-        {session ? (
-          <a className="nav-profile" href="#/profil" aria-label={`Profil actif : ${profile.name}`}>
-            <ProfileAvatar profile={profile} size={32} />
-            <div className="nav-prof-txt">
-              <strong>{profile.name}</strong>
-              <small className="mu">{profile.kid ? 'Enfant' : isPremium ? 'Premium' : 'Gratuit'}</small>
-            </div>
-          </a>
-        ) : (
-          <a className="btn p" style={{ flex: 1, minHeight: 38, padding: '6px 12px', fontSize: '0.88rem' }} href="#/connexion">
-            Se connecter
-          </a>
-        )}
-        <button
-          type="button"
-          className="icon-btn"
-          onClick={cycleTheme}
-          title={`Thème : ${st.theme === 'dark' ? 'Sombre' : st.theme === 'black' ? 'Cinéma OLED' : 'Clair'}`}
-          aria-label="Changer de thème"
-        >
-          <Icon n={st.theme === 'light' ? 'sun' : 'moon'} s={18} />
-        </button>
-      </div>
-    </nav>
+      </nav>
+    </>
   )
 }
 
@@ -233,7 +310,7 @@ export default function App() {
   return (
     <Provider>
       <a className="skip-link" href="#main-content">Aller au contenu principal</a>
-      <Sidebar />
+      <TopNav />
       <main id="main-content" className="app">
         <AdminMaintenanceBar />
         <Routes />

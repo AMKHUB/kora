@@ -2,7 +2,34 @@ import { useEffect, useState } from 'react'
 import { apiGet, apiPost, authErrorMessage, AuthUser, consumeAuthRedirectTokens, uploadFileToSignedUrl } from '../api'
 import { GoogleAuthButton } from '../auth'
 import { createIntentIdempotencyKey, SASPAY_COUNTRIES } from '../billing'
-import { Icon, KoraSymbol, MaintenancePage } from '../ui'
+import { Icon, MaintenancePage } from '../ui'
+
+function KoraStudioIcon({ size = 34 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 64 64" fill="none" role="img" aria-label="Kora Studio">
+      <defs>
+        <linearGradient id="ks-nav-bg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#1E1E26" />
+          <stop offset="100%" stopColor="#0D0D11" />
+        </linearGradient>
+        <linearGradient id="ks-nav-ring" x1="6" y1="6" x2="58" y2="58" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#F2C334" />
+          <stop offset="55%" stopColor="#FE2C55" />
+          <stop offset="100%" stopColor="#2F9E3C" />
+        </linearGradient>
+      </defs>
+      <rect x="2" y="2" width="60" height="60" rx="16" fill="url(#ks-nav-bg)" stroke="url(#ks-nav-ring)" strokeWidth="2.5" />
+      <path d="M16 19.5C16 17.567 17.567 16 19.5 16H44.5C46.433 16 48 17.567 48 19.5V23H16V19.5Z" fill="#2A2A35" />
+      <path d="M20 16L25 23H20.5L16 16.8V16H20Z" fill="#2F9E3C" />
+      <path d="M31 16L36 23H31.5L26.5 16H31Z" fill="#F2C334" />
+      <path d="M42 16L47 23H42.5L37.5 16H42Z" fill="#FE2C55" />
+      <rect x="16" y="24" width="32" height="24" rx="5" fill="#17171D" stroke="rgba(255,255,255,0.14)" strokeWidth="1.5" />
+      <path d="M27.5 30.2C27.5 29.05 28.75 28.34 29.74 28.92L39.4 34.72C40.36 35.3 40.36 36.7 39.4 37.28L29.74 43.08C28.75 43.66 27.5 42.95 27.5 41.8V30.2Z" fill="#F2C334" />
+      <circle cx="48" cy="48" r="5" fill="#0D0D11" />
+      <circle cx="48" cy="48" r="3" fill="#FE2C55" />
+    </svg>
+  )
+}
 
 type StudioTab = 'browse' | 'dashboard' | 'content' | 'upload' | 'channel' | 'analytics'
 
@@ -246,12 +273,11 @@ export default function StudioApp() {
   const totalEpisodes = titles.reduce((a, t) => a + (t.episodes?.length || 0), 0)
 
   const navItems: [StudioTab, string, string, boolean][] = [
-    ['browse', 'Catalogue public', 'grid', false],
-    ['dashboard', 'Tableau de bord', 'home', true],
-    ['content', 'Mes séries & vidéos', 'film', true],
-    ['upload', 'Mettre en ligne', 'upload', true],
+    ['dashboard', 'Accueil', 'home', true],
+    ['content', 'Publications', 'film', true],
+    ['analytics', 'Analytique & Revenus', 'sparkles', true],
     ['channel', 'Ma chaîne', 'user', true],
-    ['analytics', 'Statistiques & Revenus', 'sparkles', true]
+    ['browse', 'Inspiration', 'grid', false]
   ]
 
   const filteredPublic = publicItems.filter(it => {
@@ -263,32 +289,35 @@ export default function StudioApp() {
   const needsAuthOnCurrentTab = tab !== 'browse' && !user
 
   return (
-    <div className="studio-shell">
-      <header className="studio-topbar">
-        <a className="studio-logo" href="/studio/" onClick={e => { e.preventDefault(); setTab(user ? 'dashboard' : 'browse') }}>
-          <KoraSymbol size={28} />
-          <span className="kora-wordmark" style={{ fontSize: 22, color: '#EDEBE4' }}>Kora</span>
-          <span className="studio-tag">Studio</span>
+    <div className="tt-shell">
+      <header className="tt-topbar">
+        <a className="tt-brand" href="/studio/" onClick={e => { e.preventDefault(); setTab(user ? 'dashboard' : 'browse') }}>
+          <KoraStudioIcon size={34} />
+          <span className="tt-brand-name">
+            Kora Studio
+            <span className="tt-brand-pill">Créateurs</span>
+          </span>
         </a>
 
-        <div className="studio-top-acts">
+        <div className="tt-top-right">
           {user && (
-            <button type="button" className="btn p" onClick={startNewUpload}>
-              <Icon n="upload" s={18} />
-              <span>Mettre en ligne</span>
+            <button type="button" className="btn accent" onClick={startNewUpload}>
+              <Icon n="upload" s={17} />
+              <span>Téléverser</span>
             </button>
           )}
-          <a className="btn" href="/">
-            <Icon n="tv" s={18} />
-            <span>Voir Kora</span>
+          <a className="btn" href="/" target="_blank" rel="noopener noreferrer">
+            <Icon n="tv" s={17} />
+            <span>Kora Spectateurs</span>
           </a>
           {user
             ? <button type="button" className="btn" onClick={signOut}>Déconnexion</button>
-            : <button type="button" className="btn p" onClick={() => setAuthModal(true)}><Icon n="user" s={18} />Se connecter</button>}
+            : <button type="button" className="btn p" onClick={() => setAuthModal(true)}><Icon n="user" s={17} />Se connecter</button>}
         </div>
       </header>
 
-      <div className="studio-mobile-tabs" role="tablist">
+      <div className="tt-mobile-tabs" role="tablist">
+        <button type="button" className={'chip' + (tab === 'upload' ? ' on' : '')} onClick={startNewUpload}>+ Téléverser</button>
         {navItems.map(([k, label, _icon, locked]) => (
           <button key={k} type="button" role="tab" aria-selected={tab === k} className={'chip' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>
             {locked && !user ? '🔒 ' : ''}{label}
@@ -296,28 +325,53 @@ export default function StudioApp() {
         ))}
       </div>
 
-      <div className="studio-body">
-        <aside className="studio-nav" aria-label="Navigation Kora Studio">
-          <div className="studio-channel-mini">
-            <span className="studio-channel-badge">{user ? (channel.channel_name || 'KS').slice(0, 2).toUpperCase() : 'K'}</span>
-            <div style={{ minWidth: 0 }}>
-              <strong style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {user ? channel.channel_name : 'Visiteur (lecture seule)'}
-              </strong>
-              <small className="mu">{user ? (user.email || 'Connecté') : 'Connexion requise pour publier'}</small>
-            </div>
+      <div className="tt-layout">
+        <aside className="tt-sidebar" aria-label="Navigation Kora Studio">
+          <button type="button" className="tt-upload-cta" onClick={startNewUpload}>
+            <Icon n="plus" s={20} />
+            <span>Téléverser</span>
+          </button>
+
+          <div className="tt-nav-group">
+            <span className="tt-nav-label">Gestion</span>
+            {navItems.slice(0, 3).map(([k, label, icon, locked]) => (
+              <button key={k} type="button" className={'tt-nav-item' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>
+                <Icon n={locked && !user ? 'lock' : icon} s={19} />
+                <span>{label}</span>
+              </button>
+            ))}
           </div>
 
-          {navItems.map(([k, label, icon, locked]) => (
-            <button key={k} type="button" className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-              <Icon n={locked && !user ? 'lock' : icon} s={19} />
-              <span>{label}</span>
-            </button>
-          ))}
-          <a href="/"><Icon n="back" s={19} /><span>Retour sur Kora</span></a>
+          <div className="tt-nav-group">
+            <span className="tt-nav-label">Création</span>
+            {navItems.slice(3).map(([k, label, icon, locked]) => (
+              <button key={k} type="button" className={'tt-nav-item' + (tab === k ? ' on' : '')} onClick={() => setTab(k)}>
+                <Icon n={locked && !user ? 'lock' : icon} s={19} />
+                <span>{label}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="tt-side-foot">
+            <div className="tt-creator-chip">
+              <span className="tt-avatar">{user ? (channel.channel_name || 'KS').slice(0, 2).toUpperCase() : 'KS'}</span>
+              <div style={{ minWidth: 0 }}>
+                <strong style={{ display: 'block', fontSize: '0.86rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {user ? channel.channel_name : 'Mode découverte'}
+                </strong>
+                <small className="mu" style={{ display: 'block', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {user ? (user.email || 'Créateur actif') : 'Connectez-vous'}
+                </small>
+              </div>
+            </div>
+            <a className="tt-nav-item" href="/" target="_blank" rel="noopener noreferrer">
+              <Icon n="tv" s={18} />
+              <span>Ouvrir Kora Spectateurs</span>
+            </a>
+          </div>
         </aside>
 
-        <main className="studio-main">
+        <main className="tt-main">
           {!authReady ? (
             <p className="mu">Vérification de votre session…</p>
           ) : maintenanceMode && role !== 'admin' ? (
@@ -352,13 +406,13 @@ export default function StudioApp() {
               </div>
 
               {publicItems.length > 0 && (
-                <div className="sbar" style={{ marginBottom: 20 }}>
+                <div className="search-box">
                   <Icon n="search" s={18} />
                   <input
                     className="field"
                     value={publicSearch}
                     onChange={e => setPublicSearch(e.target.value)}
-                    placeholder="Rechercher dans le catalogue Kora…"
+                    placeholder="Rechercher une œuvre publiée…"
                     aria-label="Rechercher dans le catalogue public"
                   />
                 </div>
@@ -388,12 +442,16 @@ export default function StudioApp() {
               ) : (
                 <div className="grid">
                   {filteredPublic.map(it => (
-                    <a key={it.id} className="card" href={`/#/titre/${it.id}`}>
-                      <div className="poster">
-                        <img src={it.poster} alt={it.title} loading="lazy" />
+                    <a key={it.id} className="card" href={`/#/titre/${it.id}`} target="_blank" rel="noopener noreferrer">
+                      <div className="card-media">
+                        <div className="poster">
+                          <img src={it.poster} alt={it.title} loading="lazy" />
+                        </div>
                       </div>
-                      <span className="ct">{it.title}</span>
-                      <span className="cm">{it.country} · {it.year} · {TYPE_LABELS[it.type] || it.type}</span>
+                      <div className="card-info">
+                        <b>{it.title}</b>
+                        <small>{it.country} · {it.year} · {TYPE_LABELS[it.type] || it.type}</small>
+                      </div>
                     </a>
                   ))}
                 </div>
@@ -426,20 +484,36 @@ export default function StudioApp() {
                 <>
                   <div className="page-head">
                     <div>
-                      <h1>Tableau de bord de la chaîne</h1>
-                      <p className="mu">{channel.channel_name} · Publiez vos séries, épisodes et films comme sur YouTube Studio.</p>
+                      <h1>Bonjour, {channel.channel_name}</h1>
+                      <p className="mu">Gérez vos publications, téléversez vos films jusqu’à 5 Go et suivez vos performances.</p>
                     </div>
-                    <button type="button" className="btn p" onClick={startNewUpload}>
-                      <Icon n="upload" s={18} />Uploader une nouvelle série
+                    <button type="button" className="btn accent" onClick={startNewUpload}>
+                      <Icon n="upload" s={18} />Téléverser une œuvre
                     </button>
                   </div>
 
-                  <dl className="stats">
-                    <div><dt>Séries & Œuvres</dt><dd>{titles.length}</dd></div>
-                    <div><dt>En ligne sur Kora</dt><dd>{publishedCount}</dd></div>
-                    <div><dt>Épisodes mis en ligne</dt><dd>{totalEpisodes}</dd></div>
-                    <div><dt>Brouillons</dt><dd>{titles.length - publishedCount}</dd></div>
-                  </dl>
+                  <div className="tt-kpi-grid">
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Œuvres créées</span>
+                      <strong className="tt-kpi-val">{titles.length}</strong>
+                      <span className="tt-kpi-sub">Catalogue studio</span>
+                    </div>
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">En ligne sur Kora</span>
+                      <strong className="tt-kpi-val">{publishedCount}</strong>
+                      <span className="tt-kpi-sub">Visibles par les spectateurs</span>
+                    </div>
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Épisodes publiés</span>
+                      <strong className="tt-kpi-val">{totalEpisodes}</strong>
+                      <span className="tt-kpi-sub">Séries & Saisons</span>
+                    </div>
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Stockage vidéo</span>
+                      <strong className="tt-kpi-val">{r2Enabled ? '5 Go' : '50 Mo'}</strong>
+                      <span className="tt-kpi-sub">{r2Enabled ? 'Cloudflare R2 Actif' : 'Mode standard'}</span>
+                    </div>
+                  </div>
 
                   <section className="panel">
                     <div className="panel-head">
@@ -567,16 +641,34 @@ export default function StudioApp() {
 
               {tab === 'analytics' && (
                 <>
-                  <section className="panel">
-                    <h1>Statistiques & Monétisation Créateurs</h1>
-                    <p className="mu">Suivez l’audience de vos séries et vos revenus estimés sur Kora (partage publicitaire formule gratuite + temps de visionnage Premium).</p>
-                    <dl className="stats">
-                      <div><dt>Œuvres publiées</dt><dd>{publishedCount}</dd></div>
-                      <div><dt>Épisodes disponibles</dt><dd>{totalEpisodes}</dd></div>
-                      <div><dt>Partage revenus Kora</dt><dd>70 %</dd></div>
-                      <div><dt>Paiement créateurs</dt><dd>SasPay</dd></div>
-                    </dl>
-                  </section>
+                  <div className="page-head">
+                    <div>
+                      <h1>Analytique & Revenus Créateurs</h1>
+                      <p className="mu">Suivez vos publications et demandez vos reversements Mobile Money directement depuis Kora Studio.</p>
+                    </div>
+                  </div>
+                  <div className="tt-kpi-grid">
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Œuvres publiées</span>
+                      <strong className="tt-kpi-val">{publishedCount}</strong>
+                      <span className="tt-kpi-sub">Catalogue actif</span>
+                    </div>
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Épisodes disponibles</span>
+                      <strong className="tt-kpi-val">{totalEpisodes}</strong>
+                      <span className="tt-kpi-sub">Streaming adaptatif</span>
+                    </div>
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Partage revenus</span>
+                      <strong className="tt-kpi-val">70 %</strong>
+                      <span className="tt-kpi-sub">Publicité & Premium</span>
+                    </div>
+                    <div className="tt-kpi">
+                      <span className="tt-kpi-label">Passerelle retraits</span>
+                      <strong className="tt-kpi-val">SasPay</strong>
+                      <span className="tt-kpi-sub">Mobile Money Afrique</span>
+                    </div>
+                  </div>
 
                   <CreatorPayoutSection notify={notify} />
                 </>
@@ -1264,29 +1356,37 @@ function UploadWizard({ initial, channel, r2Enabled, onSaved, onCancel }: {
           )}
         </div>
 
-        {/* Colonne droite : Aperçu en direct de la carte Kora */}
-        <aside className="preview-card-box" aria-label="Aperçu sur Kora">
-          <strong style={{ fontSize: '0.88rem', color: 'var(--mu)' }}>Aperçu en direct sur Kora</strong>
-          <div className="preview-poster">
-            {posterUrl ? <img src={posterUrl} alt="Aperçu couverture" /> : (
-              <div style={{ padding: 14 }}>
-                <span className="pill-accent">{TYPE_LABELS[type]}</span>
-                <p className="serif" style={{ fontSize: '1.2rem', marginTop: 10 }}>{title || 'Titre de votre série'}</p>
-                <small className="mu">Couverture obligatoire</small>
-              </div>
-            )}
+        {/* Colonne droite : Simulateur mobile / aperçu TikTok Studio en direct */}
+        <aside className="tt-phone-preview" aria-label="Aperçu en direct">
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <strong style={{ fontSize: '0.88rem' }}>Aperçu spectateur en direct</strong>
+            <span className="pill-accent">{TYPE_LABELS[type]}</span>
           </div>
-          <div>
-            <strong style={{ display: 'block', fontSize: '1.05rem' }}>{title || 'Sans titre'}</strong>
-            <small className="mu">{country} · {year} · {genres[0] || 'Drame'} · {age}</small>
-            <p className="mu" style={{ fontSize: '0.84rem', marginTop: 6 }}>
-              {synShort || synLong.slice(0, 120) || 'Votre synopsis apparaîtra ici sur la fiche et en page d’accueil.'}
-            </p>
-            {type === 'series' && (
-              <p className="mu" style={{ fontSize: '0.82rem', marginTop: 8 }}>
-                <strong>{Math.max(1, ...episodes.map(e => e.season))}</strong> saison(s) · <strong>{episodes.length}</strong> épisode(s)
-              </p>
-            )}
+          <div className="tt-phone-frame">
+            <div className="tt-phone-notch" aria-hidden="true" />
+            <div className="tt-phone-screen">
+              {mainVideoPreview ? (
+                <video src={mainVideoPreview} muted loop autoPlay playsInline />
+              ) : posterUrl ? (
+                <img src={posterUrl} alt="Aperçu couverture" />
+              ) : null}
+              <div className="tt-phone-scrim" aria-hidden="true" />
+              <div className="tt-phone-meta">
+                <span className="pill-spec" style={{ justifySelf: 'start' }}>{country} · {year} · {age}</span>
+                <strong>{title || 'Titre de votre œuvre'}</strong>
+                <p>{synShort || synLong.slice(0, 110) || 'Votre synopsis et votre affiche apparaîtront ici sur l’application Kora.'}</p>
+              </div>
+            </div>
+          </div>
+          <div className="tt-spec-strip" style={{ marginTop: 0 }}>
+            <div className="tt-spec-box">
+              <strong>Capacité vidéo</strong>
+              <span>{r2Enabled ? 'Jusqu’à 5 Go · Cloudflare R2' : '50 Mo max'}</span>
+            </div>
+            <div className="tt-spec-box">
+              <strong>Format & Episodes</strong>
+              <span>{type === 'series' ? `${Math.max(1, ...episodes.map(e => e.season))} saison(s) · ${episodes.length} ép.` : `${dur} min`}</span>
+            </div>
           </div>
         </aside>
       </div>

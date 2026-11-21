@@ -20,7 +20,8 @@ const assets = [
   ['brand/logos/svg/empile-sombre.svg', 'public/brand/empile-sombre.svg'],
   ['brand/logos/svg/symbole-sombre.svg', 'public/brand/symbole-sombre.svg'],
   ['brand/logos/svg/symbole.svg', 'public/brand/symbole.svg'],
-  ['brand/logos/svg/horizontal-sombre.svg', 'public/logo.svg']
+  ['brand/logos/svg/horizontal-sombre.svg', 'public/logo.svg'],
+  ['brand/studio/studio-icon.svg', 'public/studio-icon.svg']
 ]
 
 for (const [src, dest] of assets) {
