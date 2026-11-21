@@ -1152,12 +1152,12 @@ export function Subscription() {
   return (
     <div className="page sub-page">
       <div className="sub-hero">
-        <span className="pill-accent">{billingSimulation ? 'Mode simulation · Activation gratuite' : 'Offres Kora'}</span>
+        <span className="pill-accent">{billingSimulation ? 'Offre découverte · Activation gratuite' : 'Offres & Abonnements Kora'}</span>
         <h1>Choisissez votre formule</h1>
         <p className="mu">
           {billingSimulation
-            ? 'En phase de test, vous pouvez activer Premium ou Famille gratuitement en 1 clic. En production (BILLING_MODE=live), le paiement réel devient obligatoire.'
-            : 'Sans engagement. Paiement sécurisé par Orange Money, Moov Money, Wave ou carte bancaire.'}
+            ? 'Pendant notre phase de lancement, activez gratuitement votre formule Kora Premium ou Famille en un clic et profitez du catalogue sans publicité jusqu’en 4K.'
+            : 'Sans engagement. Paiement simple et sécurisé par Orange Money, Moov Money, Wave ou carte bancaire.'}
         </p>
 
         <div className="billing-toggle" role="group" aria-label="Fréquence de facturation">
@@ -1172,7 +1172,7 @@ export function Subscription() {
         <div className="sim-banner" role="note">
           <Icon n="sparkles" s={18} />
           <div>
-            <strong>Mode simulation actif</strong> — Activez n’importe quelle formule sans payer pour tester Kora sans publicité et en 4K. Pour obliger le paiement lors du lancement final, définissez <code>BILLING_MODE=live</code> côté serveur sur Vercel.
+            <strong>Accès découverte offert</strong> — Choisissez la formule de votre choix ci-dessous pour l’activer immédiatement sans aucun frais et profiter du cinéma africain en haute définition.
           </div>
         </div>
       )}
@@ -1213,10 +1213,10 @@ export function Subscription() {
               ) : billingSimulation ? (
                 <div className="plan-actions">
                   <button type="button" className="btn p wide-btn" disabled={busy} onClick={() => activateFreeSimulation(plan.id)}>
-                    Activer {plan.name} gratuitement (simulation)
+                    Activer {plan.name} gratuitement
                   </button>
                   <button type="button" className="lnk small-lnk" onClick={() => { setPayErr(''); setCheckoutPlan(plan.id) }}>
-                    Aperçu du parcours de paiement
+                    Voir les moyens de paiement
                   </button>
                 </div>
               ) : (
@@ -1311,8 +1311,8 @@ export function Subscription() {
 
             <p className="mu small-note">
               {billingSimulation
-                ? 'Mode simulation : aucun débit réel n’est effectué.'
-                : 'Mode production : paiement vérifié côté serveur obligatoire avant activation.'}
+                ? 'Offre découverte : aucun débit ne sera effectué.'
+                : 'Transaction sécurisée. Votre abonnement est activé dès confirmation du paiement.'}
             </p>
 
             <div className="btns">

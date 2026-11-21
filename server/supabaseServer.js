@@ -16,6 +16,31 @@ export function isBillingSimulation() {
   return !(process.env.VERCEL || process.env.NODE_ENV === 'production')
 }
 
+const DEFAULT_MAINTENANCE_MSG = 'Nous effectuons une mise à jour pour améliorer votre expérience cinéma sur Kora. Le service sera de retour très bientôt.'
+
+export async function getPlatformSettings() {
+  const anon = createAnonClient()
+  if (anon) {
+    const { data, error } = await anon
+      .from('platform_settings')
+      .select('billing_simulation,maintenance_mode,maintenance_message')
+      .eq('id', 1)
+      .maybeSingle()
+    if (!error && data) {
+      return {
+        billingSimulation: Boolean(data.billing_simulation),
+        maintenanceMode: Boolean(data.maintenance_mode),
+        maintenanceMessage: String(data.maintenance_message || DEFAULT_MAINTENANCE_MSG)
+      }
+    }
+  }
+  return {
+    billingSimulation: isBillingSimulation(),
+    maintenanceMode: false,
+    maintenanceMessage: DEFAULT_MAINTENANCE_MSG
+  }
+}
+
 export function createAnonClient() {
   const { url, key } = getSupabaseConfig()
   if (!url || !key) return null

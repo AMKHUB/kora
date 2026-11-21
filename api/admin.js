@@ -1,6 +1,7 @@
 import {
   assertCsrf,
   enforceRateLimit,
+  getPlatformSettings,
   getQuery,
   getSessionContext,
   isSafeMediaUrl,
@@ -52,12 +53,13 @@ export default async function handler(req, res) {
 
   if (req.method === 'GET') {
     if (action === 'stats') {
-      const [stats, logs] = await Promise.all([
+      const [stats, logs, ps] = await Promise.all([
         db.rpc('admin_stats'),
-        db.from('audit_log').select('id,action,entity,entity_id,created_at').order('created_at', { ascending: false }).limit(15)
+        db.from('audit_log').select('id,action,entity,entity_id,created_at').order('created_at', { ascending: false }).limit(15),
+        getPlatformSettings()
       ])
       if (stats.error) return safeError(res, 400, 'Impossible de charger les statistiques.', stats.error)
-      return sendJson(res, 200, { stats: stats.data, logs: logs.data || [] })
+      return sendJson(res, 200, { stats: stats.data, logs: logs.data || [], platformSettings: ps })
     }
 
     if (action === 'reports') {
@@ -116,6 +118,20 @@ export default async function handler(req, res) {
 
   let body
   try { body = await readJsonBody(req) } catch (e) { return safeError(res, e.status || 400, 'Requête invalide.', e) }
+
+  if (action === 'platform-settings') {
+    const patch = { id: 1, updated_at: new Date().toISOString() }
+    if (typeof body.billingSimulation === 'boolean') patch.billing_simulation = body.billingSimulation
+    if (typeof body.maintenanceMode === 'boolean') patch.maintenance_mode = body.maintenanceMode
+    if (typeof body.maintenanceMessage === 'string') {
+      patch.maintenance_message = body.maintenanceMessage.trim().slice(0, 400) || 'Nous effectuons une mise à jour pour améliorer votre expérience cinéma sur Kora. Le service sera de retour très bientôt.'
+    }
+    const { error } = await db.from('platform_settings').upsert(patch)
+    if (error) return safeError(res, 400, 'Impossible de mettre à jour les réglages de la plateforme.', error)
+    await logAudit(db, uid, `platform_settings:sim=${patch.billing_simulation ?? 'unchanged'}:maint=${patch.maintenance_mode ?? 'unchanged'}`, 'platform_settings', 1)
+    const ps = await getPlatformSettings()
+    return sendJson(res, 200, { ok: true, platformSettings: ps })
+  }
 
   if (action === 'close-report') {
     const id = Number(body.id)

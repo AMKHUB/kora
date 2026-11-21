@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiGet, apiPost, authErrorMessage, AuthUser, consumeAuthRedirectTokens, uploadFileToSignedUrl } from '../api'
 import { GoogleAuthButton } from '../auth'
-import { Icon, KoraSymbol } from '../ui'
+import { Icon, KoraSymbol, MaintenancePage } from '../ui'
 
 type StudioTab = 'browse' | 'dashboard' | 'content' | 'upload' | 'channel' | 'analytics'
 
@@ -84,6 +84,9 @@ function readFileAsDataUrl(file: File): Promise<string> {
 
 export default function StudioApp() {
   const [user, setUser] = useState<AuthUser | null>(null)
+  const [role, setRole] = useState('user')
+  const [maintenanceMode, setMaintenanceMode] = useState(false)
+  const [maintenanceMessage, setMaintenanceMessage] = useState('')
   const [authReady, setAuthReady] = useState(false)
   const [recoveryMode, setRecoveryMode] = useState(() => new URLSearchParams(location.search).has('recovery'))
   const [authNotice, setAuthNotice] = useState(() => authErrorMessage(new URLSearchParams(location.search).get('err')))
@@ -122,9 +125,12 @@ export default function StudioApp() {
   }
 
   const refreshSession = async () => {
-    const r = await apiGet<{ user: AuthUser | null }>('/api/auth?action=session')
+    const r = await apiGet<{ user: AuthUser | null; role?: string; maintenanceMode?: boolean; maintenanceMessage?: string }>('/api/auth?action=session')
     const u = r.ok ? r.data.user : null
     setUser(u)
+    setRole(r.ok ? (r.data.role || 'user') : 'user')
+    setMaintenanceMode(Boolean(r.ok && r.data.maintenanceMode))
+    if (r.ok && r.data.maintenanceMessage) setMaintenanceMessage(r.data.maintenanceMessage)
     setAuthReady(true)
     if (u) {
       setTab(t => t === 'browse' ? 'dashboard' : t)
@@ -311,6 +317,12 @@ export default function StudioApp() {
         <main className="studio-main">
           {!authReady ? (
             <p className="mu">Vérification de votre session…</p>
+          ) : maintenanceMode && role !== 'admin' ? (
+            <MaintenancePage
+              message={maintenanceMessage}
+              studio
+              onLoginClick={() => setAuthModal(true)}
+            />
           ) : tab === 'browse' ? (
             <section>
               {!user && (

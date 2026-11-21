@@ -434,3 +434,88 @@ export function ToastHost() {
     </div>
   )
 }
+
+export function MaintenancePage({
+  message,
+  isAdmin = false,
+  isPreview = false,
+  studio = false,
+  onDisable,
+  onLoginClick
+}: {
+  message?: string
+  isAdmin?: boolean
+  isPreview?: boolean
+  studio?: boolean
+  onDisable?: () => void
+  onLoginClick?: () => void
+}) {
+  return (
+    <div className="maint-stage">
+      <div className="maint-card">
+        <div className="maint-halo" aria-hidden="true">
+          <svg width="96" height="96" viewBox="0 0 96 96" fill="none">
+            <circle cx="48" cy="48" r="44" stroke="#F2C334" strokeOpacity="0.24" strokeWidth="1.5" strokeDasharray="5 5" />
+            <circle cx="48" cy="48" r="34" fill="#201C14" stroke="#F2C334" strokeOpacity="0.55" strokeWidth="1.5" />
+            <g transform="translate(30, 30)">
+              <rect x="4.5" y="4.5" width="7" height="27" rx="3.5" fill="#2F9E3C" />
+              <path d="M 15 17.5 L 28.5 29" stroke="#DE1310" strokeWidth="7" strokeLinecap="round" />
+              <path d="M 13.5 18 Q 16 11 28.5 7" stroke="#F2C334" strokeWidth="7" strokeLinecap="round" fill="none" />
+            </g>
+          </svg>
+        </div>
+
+        <span className="pill-accent">
+          {isPreview ? 'Aperçu administrateur · Page de maintenance' : 'Intervention programmée · Kora'}
+        </span>
+
+        <h1>Kora prépare votre prochaine séance</h1>
+
+        <p className="maint-msg">
+          {message || 'Nous effectuons une mise à jour pour améliorer votre expérience cinéma sur Kora. Le service sera de retour très bientôt.'}
+        </p>
+
+        <div className="maint-pillars">
+          <div>
+            <strong>Catalogue préservé</strong>
+            <small className="mu">Vos séries, votre liste et vos profils restent intacts.</small>
+          </div>
+          <div>
+            <strong>Streaming & Audio</strong>
+            <small className="mu">Optimisation de la diffusion vidéo et des sous-titres.</small>
+          </div>
+          <div>
+            <strong>Retour imminent</strong>
+            <small className="mu">Merci pour votre patience et votre fidélité.</small>
+          </div>
+        </div>
+
+        <div className="btns" style={{ justifyContent: 'center' }}>
+          <button type="button" className="btn p" onClick={() => location.reload()}>
+            Actualiser l’état du service
+          </button>
+          {isAdmin && onDisable && (
+            <button type="button" className="btn" onClick={onDisable}>
+              <Icon n="check" s={18} />Désactiver la maintenance (Ouvrir le site)
+            </button>
+          )}
+          {isPreview && (
+            <a className="btn" href={studio ? '/studio/' : '#/admin'}>
+              Retour à l’espace administrateur
+            </a>
+          )}
+        </div>
+
+        {!isAdmin && (
+          <p className="mu" style={{ fontSize: '0.82rem', marginTop: 8 }}>
+            {onLoginClick ? (
+              <button type="button" className="lnk small-lnk" onClick={onLoginClick}>Accès équipe & administrateur</button>
+            ) : (
+              <a className="lnk small-lnk" href="#/connexion">Accès équipe & administrateur</a>
+            )}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}

@@ -8,10 +8,10 @@ import {
   enforceRateLimit,
   frAuthError,
   getOrigin,
+  getPlatformSettings,
   getQuery,
   getSessionContext,
   getSupabaseConfig,
-  isBillingSimulation,
   readJsonBody,
   readPkceCookie,
   safeError,
@@ -49,10 +49,12 @@ export default async function handler(req, res) {
   const cfg = getSupabaseConfig()
 
   if (action === 'session' && req.method === 'GET') {
-    const ctx = await getSessionContext(req, res)
+    const [ctx, ps] = await Promise.all([getSessionContext(req, res), getPlatformSettings()])
     return sendJson(res, 200, {
       configured: cfg.configured,
-      billingMode: isBillingSimulation() ? 'simulation' : 'live',
+      billingMode: ps.billingSimulation ? 'simulation' : 'live',
+      maintenanceMode: ps.maintenanceMode,
+      maintenanceMessage: ps.maintenanceMessage,
       user: sanitizeUser(ctx.user),
       role: ctx.role
     })

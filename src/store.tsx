@@ -287,6 +287,8 @@ type Ctx = {
   authReady: boolean
   authConfigured: boolean
   billingSimulation: boolean
+  maintenanceMode: boolean
+  maintenanceMessage: string
   role: string
   isPremium: boolean
   unreadCount: number
@@ -295,6 +297,7 @@ type Ctx = {
   dismissToast: (id: number) => void
   requireAuth: (actionLabel?: string) => boolean
   refreshSession: () => Promise<void>
+  updatePlatformSettings: (patch: { billingSimulation?: boolean; maintenanceMode?: boolean; maintenanceMessage?: string }) => Promise<boolean>
   signOut: () => Promise<void>
   reloadCatalog: () => void
   toggleList: (id: number) => void
@@ -328,6 +331,8 @@ export function Provider({ children }: { children: ReactNode }) {
   const [authReady, setAuthReady] = useState(false)
   const [authConfigured, setAuthConfigured] = useState(true)
   const [billingSimulation, setBillingSimulation] = useState(true)
+  const [maintenanceMode, setMaintenanceMode] = useState(false)
+  const [maintenanceMessage, setMaintenanceMessage] = useState('Nous effectuons une mise à jour pour améliorer votre expérience cinéma sur Kora. Le service sera de retour très bientôt.')
   const [role, setRole] = useState('user')
   const [toasts, setToasts] = useState<Toast[]>([])
 
@@ -378,10 +383,19 @@ export function Provider({ children }: { children: ReactNode }) {
   useEffect(() => { reloadCatalog() }, [reloadCatalog])
 
   const refreshSession = useCallback(async () => {
-    const r = await apiGet<{ configured: boolean; billingMode: string; user: AuthUser | null; role: string }>('/api/auth?action=session')
+    const r = await apiGet<{
+      configured: boolean
+      billingMode: string
+      maintenanceMode?: boolean
+      maintenanceMessage?: string
+      user: AuthUser | null
+      role: string
+    }>('/api/auth?action=session')
     if (r.ok) {
       setAuthConfigured(!!r.data.configured)
       setBillingSimulation(r.data.billingMode !== 'live')
+      setMaintenanceMode(!!r.data.maintenanceMode)
+      if (r.data.maintenanceMessage) setMaintenanceMessage(r.data.maintenanceMessage)
       setSession(r.data.user ? { user: r.data.user } : null)
       setRole(r.data.role || 'user')
     } else {
@@ -390,6 +404,20 @@ export function Provider({ children }: { children: ReactNode }) {
     }
     setAuthReady(true)
   }, [])
+
+  const updatePlatformSettings = useCallback(async (patch: { billingSimulation?: boolean; maintenanceMode?: boolean; maintenanceMessage?: string }) => {
+    const r = await apiPost<{ platformSettings?: { billingSimulation: boolean; maintenanceMode: boolean; maintenanceMessage: string } }>('/api/admin?action=platform-settings', patch)
+    if (!r.ok) {
+      toast(r.data.error || 'Impossible de modifier ce réglage.', 'err')
+      return false
+    }
+    if (r.data.platformSettings) {
+      setBillingSimulation(r.data.platformSettings.billingSimulation)
+      setMaintenanceMode(r.data.platformSettings.maintenanceMode)
+      setMaintenanceMessage(r.data.platformSettings.maintenanceMessage)
+    }
+    return true
+  }, [toast])
 
   useEffect(() => {
     let active = true
@@ -502,6 +530,8 @@ export function Provider({ children }: { children: ReactNode }) {
     authReady,
     authConfigured,
     billingSimulation,
+    maintenanceMode,
+    maintenanceMessage,
     role,
     isPremium,
     unreadCount,
@@ -510,6 +540,7 @@ export function Provider({ children }: { children: ReactNode }) {
     dismissToast,
     requireAuth,
     refreshSession,
+    updatePlatformSettings,
     reloadCatalog,
     signOut: async () => {
       await apiPost('/api/auth?action=logout')
@@ -636,6 +667,15 @@ export function Provider({ children }: { children: ReactNode }) {
       const plan = PLANS.find(p => p.id === planId)!
       const amount = billing === 'year' ? plan.priceYear : plan.priceMonth
       let ref = `SIM-${Date.now().toString(36).toUpperCase()}`
+
+      if (planId !== 'free' && billingSimulation) {
+        const chk = await apiPost('/api/me?action=check-simulation')
+        if (!chk.ok) {
+          setBillingSimulation(false)
+          toast(chk.data.error || 'Paiement requis pour activer cette formule.', 'err')
+          return { ok: false, error: chk.data.error }
+        }
+      }
 
       if (planId !== 'free' && !billingSimulation) {
         const res = await processPaymentCheckout({

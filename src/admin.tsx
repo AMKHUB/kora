@@ -81,9 +81,14 @@ export function Admin({ q }: { q: URLSearchParams }) {
 }
 
 function Stats() {
+  const { billingSimulation, maintenanceMode, maintenanceMessage, updatePlatformSettings, toast } = useApp()
   const [s, setS] = useState<any>(null)
   const [logs, setLogs] = useState<any[]>([])
   const [err, setErr] = useState('')
+  const [maintDraft, setMaintDraft] = useState(maintenanceMessage)
+  const [ctrlBusy, setCtrlBusy] = useState(false)
+
+  useEffect(() => { setMaintDraft(maintenanceMessage) }, [maintenanceMessage])
 
   useEffect(() => {
     apiGet<{ stats: any; logs: any[] }>('/api/admin?action=stats').then(r => {
@@ -91,6 +96,33 @@ function Stats() {
       else { setS(r.data.stats); setLogs(r.data.logs || []) }
     })
   }, [])
+
+  const toggleSimulation = async () => {
+    setCtrlBusy(true)
+    const next = !billingSimulation
+    const ok = await updatePlatformSettings({ billingSimulation: next })
+    setCtrlBusy(false)
+    if (ok) {
+      toast(next ? 'Mode simulation activé : les utilisateurs peuvent activer un abonnement gratuitement.' : 'Mode simulation désactivé : le paiement est désormais obligatoire.', 'ok')
+    }
+  }
+
+  const toggleMaintenance = async () => {
+    setCtrlBusy(true)
+    const next = !maintenanceMode
+    const ok = await updatePlatformSettings({ maintenanceMode: next, maintenanceMessage: maintDraft })
+    setCtrlBusy(false)
+    if (ok) {
+      toast(next ? 'Page de maintenance activée sur Kora et Kora Studio.' : 'Page de maintenance désactivée : la plateforme est ouverte au public.', 'ok')
+    }
+  }
+
+  const saveMaintMessage = async () => {
+    setCtrlBusy(true)
+    const ok = await updatePlatformSettings({ maintenanceMessage: maintDraft })
+    setCtrlBusy(false)
+    if (ok) toast('Message de maintenance enregistré.', 'ok')
+  }
 
   if (err) return <p className="mu">{err}</p>
   if (!s) return <p className="mu">Chargement des statistiques…</p>
@@ -110,6 +142,87 @@ function Stats() {
 
   return (
     <>
+      <section className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>Pilotage de la plateforme</h2>
+            <p className="mu">Contrôlez en un clic le mode d’abonnement et la page de maintenance publique.</p>
+          </div>
+        </div>
+
+        <div className="control-cards">
+          <div className="control-card">
+            <div className="control-top">
+              <div>
+                <strong>Mode simulation (Abonnements gratuits)</strong>
+                <p className="mu">
+                  {billingSimulation
+                    ? 'Les visiteurs connectés peuvent activer Kora Premium ou Famille gratuitement en 1 clic.'
+                    : 'Le paiement réel (Orange Money, Moov Money, Wave ou Carte) est obligatoire pour activer une formule.'}
+                </p>
+              </div>
+              <span className={billingSimulation ? 'pill-ok' : 'pill-spec'}>
+                {billingSimulation ? 'Simulation active' : 'Paiement obligatoire'}
+              </span>
+            </div>
+            <div className="btns flush">
+              <button
+                type="button"
+                className={'btn ' + (billingSimulation ? '' : 'p')}
+                disabled={ctrlBusy}
+                onClick={toggleSimulation}
+              >
+                <Icon n="crown" s={18} />
+                {billingSimulation ? 'Désactiver la simulation (Obliger le paiement)' : 'Activer le mode simulation (Gratuit 1 clic)'}
+              </button>
+              <a className="btn" href="#/abonnement">Voir la page Offres</a>
+            </div>
+          </div>
+
+          <div className="control-card">
+            <div className="control-top">
+              <div>
+                <strong>Page de maintenance de la plateforme</strong>
+                <p className="mu">
+                  {maintenanceMode
+                    ? 'La page de maintenance est actuellement affichée à tous les visiteurs (Kora & Kora Studio).'
+                    : 'La plateforme est ouverte normalement à tous les spectateurs et créateurs.'}
+                </p>
+              </div>
+              <span className={maintenanceMode ? 'pill-accent' : 'pill-ok'}>
+                {maintenanceMode ? 'En maintenance' : 'En ligne'}
+              </span>
+            </div>
+
+            <label style={{ display: 'grid', gap: 5, fontSize: '0.84rem', color: 'var(--mu)' }}>
+              Message affiché sur la page de maintenance
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input
+                  className="field"
+                  value={maintDraft}
+                  onChange={e => setMaintDraft(e.target.value)}
+                  placeholder="Message pour vos spectateurs…"
+                />
+                <button type="button" className="btn" disabled={ctrlBusy} onClick={saveMaintMessage}>Enregistrer</button>
+              </div>
+            </label>
+
+            <div className="btns flush">
+              <button
+                type="button"
+                className={'btn ' + (maintenanceMode ? 'p' : 'danger')}
+                disabled={ctrlBusy}
+                onClick={toggleMaintenance}
+              >
+                <Icon n={maintenanceMode ? 'check' : 'alert'} s={18} />
+                {maintenanceMode ? 'Désactiver la maintenance (Ouvrir le site)' : 'Afficher la page de maintenance'}
+              </button>
+              <a className="btn" href="#/maintenance">Aperçu de la page de maintenance</a>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <dl className="stats">
         {rows.map(([k, v]) => (
           <div key={k}><dt>{k}</dt><dd>{typeof v === 'number' ? num(v) : String(v)}</dd></div>
@@ -771,7 +884,7 @@ function SubtitleManager({ titleId, episodes }: { titleId: number; episodes: any
   return (
     <div className="form" style={{ maxWidth: 'none' }}>
       <h3>Sous-titres synchronisés avec la voix (WebVTT / SRT / IA)</h3>
-      <p className="mu">Importez un fichier <code>.vtt</code> ou <code>.srt</code>, ou lancez la transcription vocale IA pour caler automatiquement les répliques sur le son de la vidéo.</p>
+      <p className="mu">Importez un fichier de sous-titres (.vtt ou .srt), ou lancez la transcription vocale IA pour caler automatiquement les répliques sur le son de la vidéo.</p>
 
       <div className="inline">
         {episodes.length > 0 && (

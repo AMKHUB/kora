@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Provider, useApp } from './store'
-import { BrandLogo, Icon, ProfileAvatar, ToastHost } from './ui'
+import { BrandLogo, Icon, MaintenancePage, ProfileAvatar, ToastHost } from './ui'
 import { Categories, Detail, Home, MyList, NotFound, Profile, Search, Settings, Subscription } from './pages'
 import { Privacy, Terms } from './legal'
 import { Auth, AuthRequiredGate, EmailConfirmPage, ResetPasswordPage } from './auth'
@@ -139,9 +139,31 @@ function Sidebar() {
 
 function Routes() {
   const { seg, q } = useRoute()
-  const { session, authReady } = useApp()
+  const { session, authReady, role, maintenanceMode, maintenanceMessage, updatePlatformSettings, toast } = useApp()
   if (location.pathname !== '/' && location.pathname !== '/index.html') return <NotFound />
   const [a, b, c] = seg
+
+  const disableMaint = async () => {
+    const ok = await updatePlatformSettings({ maintenanceMode: false })
+    if (ok) toast('Mode maintenance désactivé : Kora est de nouveau ouvert au public.', 'ok')
+  }
+
+  // Page d'aperçu de maintenance ou blocage automatique des visiteurs lorsque la maintenance est activée
+  if (a === 'maintenance') {
+    return (
+      <MaintenancePage
+        message={maintenanceMessage}
+        isAdmin={role === 'admin'}
+        isPreview={role === 'admin'}
+        onDisable={role === 'admin' ? disableMaint : undefined}
+      />
+    )
+  }
+
+  const isAuthRoute = a === 'connexion' || a === 'confirmation' || a === 'reinitialisation' || a === 'mot-de-passe-oublie'
+  if (authReady && maintenanceMode && role !== 'admin' && !isAuthRoute) {
+    return <MaintenancePage message={maintenanceMessage} />
+  }
 
   const protectedRoute = (title: string, desc: string, node: JSX.Element) => {
     if (!authReady) return <p className="page mu">Vérification de votre session…</p>
@@ -184,12 +206,38 @@ function Routes() {
   }
 }
 
+function AdminMaintenanceBar() {
+  const { maintenanceMode, role, updatePlatformSettings, toast } = useApp()
+  if (!maintenanceMode || role !== 'admin') return null
+  return (
+    <div className="maint-admin-bar" role="status">
+      <span><strong>Mode maintenance actif</strong> — Les visiteurs voient actuellement la page de maintenance.</span>
+      <div className="btns flush">
+        <a className="btn" href="#/maintenance">Aperçu de la page</a>
+        <button
+          type="button"
+          className="btn p"
+          onClick={async () => {
+            const ok = await updatePlatformSettings({ maintenanceMode: false })
+            if (ok) toast('Maintenance désactivée. La plateforme est ouverte.', 'ok')
+          }}
+        >
+          Désactiver la maintenance
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <Provider>
       <a className="skip-link" href="#main-content">Aller au contenu principal</a>
       <Sidebar />
-      <main id="main-content" className="app"><Routes /></main>
+      <main id="main-content" className="app">
+        <AdminMaintenanceBar />
+        <Routes />
+      </main>
       <Consent />
       <ToastHost />
     </Provider>

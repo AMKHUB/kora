@@ -1,6 +1,7 @@
 import {
   assertCsrf,
   enforceRateLimit,
+  getPlatformSettings,
   getQuery,
   getSessionContext,
   hashPinServer,
@@ -246,6 +247,14 @@ export default async function handler(req, res) {
     if (!Number.isInteger(titleId) || titleId <= 0 || !reason) return sendJson(res, 400, { error: 'Motif requis.' })
     const { error } = await db.from('reports').insert({ account_id: uid, title_id: titleId, reason, status: 'open' })
     if (error) return safeError(res, 400, 'Impossible d’envoyer le signalement.', error)
+    return sendJson(res, 200, { ok: true })
+  }
+
+  if (action === 'check-simulation') {
+    const ps = await getPlatformSettings()
+    if (!ps.billingSimulation) {
+      return sendJson(res, 402, { error: 'L’activation gratuite est désactivée. Un paiement est requis pour souscrire à cette formule.' })
+    }
     return sendJson(res, 200, { ok: true })
   }
 
