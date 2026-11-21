@@ -43,7 +43,7 @@ export function Admin({ q }: { q: URLSearchParams }) {
   }
 
   const tabs: [string, string][] = role === 'admin'
-    ? [['stats', 'Pilotage & Métriques'], ['titles', 'Métadonnées catalogue'], ['rights', 'Droits par pays'], ['users', 'Comptes & Rôles'], ['reports', 'Signalements']]
+    ? [['stats', 'Pilotage & Métriques'], ['ads', 'Publicités'], ['titles', 'Métadonnées catalogue'], ['rights', 'Droits par pays'], ['users', 'Comptes & Rôles'], ['reports', 'Signalements']]
     : [['reports', 'Signalements']]
   const defaultTab = role === 'admin' ? 'stats' : 'reports'
   const tab = tabs.some(([k]) => k === q.get('t')) ? (q.get('t') as string) : defaultTab
@@ -70,6 +70,7 @@ export function Admin({ q }: { q: URLSearchParams }) {
       </div>
 
       {tab === 'stats' && <Stats />}
+      {tab === 'ads' && <AdsManager />}
       {tab === 'titles' && (id && id !== 'new' ? <MetadataEditor key={id} id={id} /> : <List />)}
       {tab === 'rights' && <RightsManager />}
       {tab === 'users' && <UsersManager />}
@@ -768,6 +769,392 @@ function MetadataEditor({ id }: { id: string }) {
         <button type="button" className="btn danger" disabled={busy} onClick={del}>Supprimer du catalogue</button>
       </div>
       {msg && <p role="status">{msg}</p>}
+    </div>
+  )
+}
+
+
+const EMPTY_CAMPAIGN = {
+  id: 0,
+  name: '',
+  advertiser: '',
+  placement: 'preroll',
+  media_type: 'video',
+  media_url: '',
+  storage_path: '',
+  click_url: '',
+  cta_label: 'En savoir plus',
+  duration_sec: '15',
+  skip_after_sec: '5',
+  target_countries: '',
+  cpm_xof: '1500',
+  max_impressions: '',
+  priority: '10',
+  active: true,
+  starts_at: '',
+  ends_at: ''
+}
+
+function AdsManager() {
+  const { toast } = useApp()
+  const [loading, setLoading] = useState(true)
+  const [campaigns, setCampaigns] = useState<any[]>([])
+  const [summary, setSummary] = useState({
+    activeCampaigns: 0,
+    totalImpressions: 0,
+    totalClicks: 0,
+    totalCompletions: 0,
+    vastImpressions: 0,
+    ctrPct: 0,
+    completionPct: 0,
+    estRevenueXof: 0,
+    creatorShareXof: 0
+  })
+  const [cfg, setCfg] = useState({
+    ads_enabled: true,
+    midroll_enabled: false,
+    midroll_interval_min: 20,
+    vast_tag_url: ''
+  })
+  const [cfgBusy, setCfgBusy] = useState(false)
+  const [vastTestMsg, setVastTestMsg] = useState('')
+  const [f, setF] = useState({ ...EMPTY_CAMPAIGN })
+  const [saving, setSaving] = useState(false)
+  const [uploading, setUploading] = useState(false)
+
+  const load = async () => {
+    setLoading(true)
+    const r = await apiGet<{ config: any; campaigns: any[]; summary: any }>('/api/ads?action=admin-list')
+    setLoading(false)
+    if (!r.ok) { toast(r.data.error || 'Impossible de charger les publicités.', 'err'); return }
+    if (r.data.config) setCfg(r.data.config)
+    setCampaigns(r.data.campaigns || [])
+    if (r.data.summary) setSummary(r.data.summary)
+  }
+
+  useEffect(() => { load() }, [])
+
+  const saveConfig = async () => {
+    setCfgBusy(true)
+    const r = await apiPost('/api/ads?action=admin-config', cfg)
+    setCfgBusy(false)
+    if (!r.ok) { toast(r.data.error || 'Enregistrement impossible.', 'err'); return }
+    toast('Réglages publicitaires enregistrés.', 'ok')
+  }
+
+  const testVast = async () => {
+    if (!cfg.vast_tag_url.trim()) {
+      setVastTestMsg('Saisissez d’abord un lien publicitaire de secours (VAST).')
+      return
+    }
+    setCfgBusy(true); setVastTestMsg('Vérification du lien en cours…')
+    const r = await apiPost<{ advertiser?: string; name?: string; durationSec?: number }>('/api/ads?action=admin-test-vast', {
+      vast_tag_url: cfg.vast_tag_url.trim()
+    })
+    setCfgBusy(false)
+    if (!r.ok) {
+      setVastTestMsg(r.data.error || 'Aucune annonce vidéo valide détectée à cette adresse.')
+      return
+    }
+    setVastTestMsg(`Lien opérationnel : « ${r.data.name} » (${r.data.advertiser}) · ${r.data.durationSec} s.`)
+  }
+
+  const uploadSpot = async (file?: File) => {
+    if (!file) return
+    setUploading(true)
+    const sign = await apiPost<{ signedUrl: string; path: string; publicUrl: string }>('/api/ads?action=admin-sign-upload', {
+      fileName: file.name,
+      mime: file.type,
+      sizeBytes: file.size
+    })
+    if (!sign.ok || !sign.data.signedUrl) {
+      setUploading(false)
+      toast(sign.data.error || 'Impossible de préparer l’envoi du spot.', 'err')
+      return
+    }
+    const up = await uploadFileToSignedUrl(sign.data.signedUrl, file)
+    setUploading(false)
+    if (!up.ok) { toast(up.error || 'Échec de l’envoi du spot.', 'err'); return }
+    const isImage = file.type.startsWith('image/')
+    setF(x => ({
+      ...x,
+      media_type: isImage ? 'image' : 'video',
+      media_url: sign.data.publicUrl,
+      storage_path: sign.data.path
+    }))
+    toast('Spot publicitaire importé avec succès.', 'ok')
+  }
+
+  const saveCampaign = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setSaving(true)
+    const r = await apiPost('/api/ads?action=admin-save', {
+      id: f.id || undefined,
+      name: f.name,
+      advertiser: f.advertiser,
+      placement: f.placement,
+      media_type: f.media_type,
+      media_url: f.media_url,
+      storage_path: f.storage_path || null,
+      click_url: f.click_url,
+      cta_label: f.cta_label,
+      duration_sec: Number(f.duration_sec) || 15,
+      skip_after_sec: Math.max(0, Number(f.skip_after_sec) || 0),
+      target_countries: f.target_countries,
+      cpm_xof: Number(f.cpm_xof) || 0,
+      max_impressions: f.max_impressions ? Number(f.max_impressions) : null,
+      priority: Number(f.priority) || 10,
+      active: f.active,
+      starts_at: f.starts_at || null,
+      ends_at: f.ends_at || null
+    })
+    setSaving(false)
+    if (!r.ok) { toast(r.data.error || 'Enregistrement impossible.', 'err'); return }
+    toast(f.id ? 'Campagne mise à jour.' : 'Campagne publicitaire créée !', 'ok')
+    setF({ ...EMPTY_CAMPAIGN })
+    load()
+  }
+
+  const editCampaign = (c: any) => {
+    setF({
+      id: c.id,
+      name: c.name || '',
+      advertiser: c.advertiser || '',
+      placement: c.placement || 'preroll',
+      media_type: c.media_type || 'video',
+      media_url: c.media_url || '',
+      storage_path: c.storage_path || '',
+      click_url: c.click_url || '',
+      cta_label: c.cta_label || 'En savoir plus',
+      duration_sec: String(c.duration_sec ?? 15),
+      skip_after_sec: String(c.skip_after_sec ?? 5),
+      target_countries: Array.isArray(c.target_countries) ? c.target_countries.join(', ') : '',
+      cpm_xof: String(c.cpm_xof ?? 1500),
+      max_impressions: c.max_impressions ? String(c.max_impressions) : '',
+      priority: String(c.priority ?? 10),
+      active: Boolean(c.active),
+      starts_at: c.starts_at ? String(c.starts_at).slice(0, 10) : '',
+      ends_at: c.ends_at ? String(c.ends_at).slice(0, 10) : ''
+    })
+    window.scrollTo({ top: 320, behavior: 'smooth' })
+  }
+
+  const toggleCampaign = async (c: any) => {
+    const r = await apiPost('/api/ads?action=admin-toggle', { id: c.id, active: !c.active })
+    if (!r.ok) { toast(r.data.error || 'Action impossible.', 'err'); return }
+    toast(!c.active ? 'Campagne activée.' : 'Campagne mise en pause.', 'info')
+    load()
+  }
+
+  const deleteCampaign = async (c: any) => {
+    if (!confirm(`Supprimer la campagne « ${c.name} » ?`)) return
+    const r = await apiPost('/api/ads?action=admin-delete', { id: c.id })
+    if (!r.ok) { toast(r.data.error || 'Suppression impossible.', 'err'); return }
+    toast('Campagne supprimée.', 'info')
+    if (f.id === c.id) setF({ ...EMPTY_CAMPAIGN })
+    load()
+  }
+
+  if (loading) return <p className="mu">Chargement de la régie publicitaire…</p>
+
+  const kpis: [string, string][] = [
+    ['Campagnes actives', num(summary.activeCampaigns)],
+    ['Vues publicitaires', num(summary.totalImpressions + summary.vastImpressions)],
+    ['Clics (taux)', `${num(summary.totalClicks)} (${summary.ctrPct} %)`],
+    ['Visionnages complets', `${summary.completionPct} %`],
+    ['Revenus estimés', `${num(summary.estRevenueXof)} FCFA`],
+    ['Part créateurs (70 %)', `${num(summary.creatorShareXof)} FCFA`]
+  ]
+
+  return (
+    <div className="admin-dash">
+      <dl className="stats">
+        {kpis.map(([k, v]) => (
+          <div key={k}><dt>{k}</dt><dd>{v}</dd></div>
+        ))}
+      </dl>
+
+      <section className="panel form" style={{ maxWidth: 'none' }}>
+        <div>
+          <h2>Diffusion hybride (Régie directe + Secours VAST)</h2>
+          <p className="mu">
+            Kora diffuse en priorité vos campagnes directes vendues aux annonceurs. Si aucune campagne directe ne correspond au pays du spectateur, le lecteur bascule automatiquement sur votre lien de secours (VAST) ou une autopromo Kora Premium.
+          </p>
+        </div>
+
+        <div className="control-grid">
+          <div className="control-card">
+            <label className="chk" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={cfg.ads_enabled}
+                onChange={e => setCfg(x => ({ ...x, ads_enabled: e.target.checked }))}
+              />
+              <span><strong>Activer la publicité sur la formule gratuite</strong> (jamais affichée aux abonnés Premium/Famille ni aux profils enfants)</span>
+            </label>
+
+            <label className="chk" style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <input
+                type="checkbox"
+                checked={cfg.midroll_enabled}
+                onChange={e => setCfg(x => ({ ...x, midroll_enabled: e.target.checked }))}
+              />
+              <span><strong>Pauses publicitaires en milieu de film</strong> (pour les œuvres longues)</span>
+            </label>
+
+            {cfg.midroll_enabled && (
+              <label>Intervalle entre deux pauses (minutes)
+                <input
+                  className="field narrow"
+                  type="number"
+                  min={5}
+                  max={60}
+                  value={cfg.midroll_interval_min}
+                  onChange={e => setCfg(x => ({ ...x, midroll_interval_min: Number(e.target.value) || 20 }))}
+                />
+              </label>
+            )}
+          </div>
+
+          <div className="control-card">
+            <label>Lien publicitaire de secours (VAST — optionnel)
+              <input
+                className="field"
+                value={cfg.vast_tag_url}
+                onChange={e => setCfg(x => ({ ...x, vast_tag_url: e.target.value }))}
+                placeholder="https://pubads.g.doubleclick.net/gampad/ads?..."
+              />
+            </label>
+            <small className="mu">Utile pour monétiser automatiquement les spectateurs de la diaspora ou les pays sans annonceur direct.</small>
+            {vastTestMsg && <p className="status-box" role="status">{vastTestMsg}</p>}
+            <div className="btns flush">
+              <button type="button" className="btn p" disabled={cfgBusy} onClick={saveConfig}>
+                {cfgBusy ? 'Enregistrement…' : 'Enregistrer les réglages'}
+              </button>
+              <button type="button" className="btn" disabled={cfgBusy} onClick={testVast}>
+                Tester le lien VAST
+              </button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="panel form" style={{ maxWidth: 'none' }}>
+        <div className="panel-head">
+          <h2>{f.id ? `Modifier la campagne #${f.id}` : 'Nouvelle campagne directe'}</h2>
+          {f.id > 0 && (
+            <button type="button" className="lnk" onClick={() => setF({ ...EMPTY_CAMPAIGN })}>Annuler la modification</button>
+          )}
+        </div>
+
+        <form className="form" style={{ maxWidth: 'none' }} onSubmit={saveCampaign}>
+          <div className="inline">
+            <label>Nom de la campagne
+              <input className="field" required value={f.name} onChange={e => setF(x => ({ ...x, name: e.target.value }))} placeholder="Ex. Lancement Fibre Bamako" />
+            </label>
+            <label>Annonceur / Marque
+              <input className="field" required value={f.advertiser} onChange={e => setF(x => ({ ...x, advertiser: e.target.value }))} placeholder="Ex. Orange Mali, Moov, Banque…" />
+            </label>
+            <label>Emplacement
+              <select value={f.placement} onChange={e => setF(x => ({ ...x, placement: e.target.value }))}>
+                <option value="preroll">Avant la vidéo (Pre-roll)</option>
+                <option value="midroll">Pause milieu de film (Mid-roll)</option>
+              </select>
+            </label>
+          </div>
+
+          <div className="inline">
+            <label>Format du spot
+              <select value={f.media_type} onChange={e => setF(x => ({ ...x, media_type: e.target.value }))}>
+                <option value="video">Spot vidéo (MP4 / WebM / MOV)</option>
+                <option value="image">Visuel fixe (JPG / PNG / WebP)</option>
+              </select>
+            </label>
+            <label>Importer un fichier spot
+              <input
+                type="file"
+                accept="video/mp4,video/webm,video/quicktime,image/jpeg,image/png,image/webp"
+                disabled={uploading}
+                onChange={e => uploadSpot(e.target.files?.[0])}
+              />
+            </label>
+            <label>Ou lien direct du spot (HTTPS)
+              <input className="field" required value={f.media_url} onChange={e => setF(x => ({ ...x, media_url: e.target.value }))} placeholder="https://…" />
+            </label>
+          </div>
+
+          <div className="inline">
+            <label>Lien du bouton « En savoir plus » (optionnel)
+              <input className="field" value={f.click_url} onChange={e => setF(x => ({ ...x, click_url: e.target.value }))} placeholder="https://site-annonceur.com" />
+            </label>
+            <label>Texte du bouton
+              <input className="field narrow" value={f.cta_label} onChange={e => setF(x => ({ ...x, cta_label: e.target.value }))} placeholder="En savoir plus" />
+            </label>
+            <label>Pays ciblés (codes ex. ML, CI, SN ou vide = tous)
+              <input className="field" value={f.target_countries} onChange={e => setF(x => ({ ...x, target_countries: e.target.value }))} placeholder="Tous les pays" />
+            </label>
+          </div>
+
+          <div className="inline">
+            <label>Durée (s)
+              <input className="field narrow" type="number" min={3} max={120} value={f.duration_sec} onChange={e => setF(x => ({ ...x, duration_sec: e.target.value }))} />
+            </label>
+            <label>Ignorable après (s, 0 = obligatoire)
+              <input className="field narrow" type="number" min={0} max={60} value={f.skip_after_sec} onChange={e => setF(x => ({ ...x, skip_after_sec: e.target.value }))} />
+            </label>
+            <label>Tarif / 1 000 vues (FCFA)
+              <input className="field narrow" type="number" min={0} value={f.cpm_xof} onChange={e => setF(x => ({ ...x, cpm_xof: e.target.value }))} />
+            </label>
+            <label>Plafond de vues (optionnel)
+              <input className="field narrow" type="number" min={1} value={f.max_impressions} onChange={e => setF(x => ({ ...x, max_impressions: e.target.value }))} placeholder="Illimité" />
+            </label>
+            <label>Priorité (1–100)
+              <input className="field narrow" type="number" min={1} max={100} value={f.priority} onChange={e => setF(x => ({ ...x, priority: e.target.value }))} />
+            </label>
+          </div>
+
+          <div className="inline">
+            <label>Date de début
+              <input className="field narrow" type="date" value={f.starts_at} onChange={e => setF(x => ({ ...x, starts_at: e.target.value }))} />
+            </label>
+            <label>Date de fin
+              <input className="field narrow" type="date" value={f.ends_at} onChange={e => setF(x => ({ ...x, ends_at: e.target.value }))} />
+            </label>
+            <label className="chk" style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <input type="checkbox" checked={f.active} onChange={e => setF(x => ({ ...x, active: e.target.checked }))} />
+              <span>Campagne active</span>
+            </label>
+          </div>
+
+          <div className="btns">
+            <button type="submit" className="btn p" disabled={saving || uploading}>
+              {uploading ? 'Envoi du spot…' : saving ? 'Enregistrement…' : f.id ? 'Enregistrer la campagne' : 'Créer la campagne'}
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section className="panel">
+        <h2>Campagnes directes ({campaigns.length})</h2>
+        <Table
+          head={['Campagne', 'Emplacement', 'Pays', 'Vues', 'Clics', 'Tarif', 'Statut', 'Actions']}
+          empty="Aucune campagne directe enregistrée. Ajoutez votre premier annonceur ci-dessus."
+          rows={campaigns.map(c => [
+            <span key={`n-${c.id}`}><strong>{c.name}</strong><br /><small className="mu">{c.advertiser}</small></span>,
+            c.placement === 'midroll' ? 'Milieu (Mid-roll)' : 'Avant (Pre-roll)',
+            Array.isArray(c.target_countries) && c.target_countries.length ? c.target_countries.join(', ') : 'Tous',
+            c.max_impressions ? `${num(c.impressions_count)} / ${num(c.max_impressions)}` : num(c.impressions_count),
+            num(c.clicks_count),
+            `${num(c.cpm_xof)} FCFA`,
+            <span key={`s-${c.id}`} className={c.active ? 'pill-ok' : 'pill-spec'}>{c.active ? 'Active' : 'En pause'}</span>,
+            <span key={`a-${c.id}`} className="table-actions">
+              <button type="button" className="lnk" onClick={() => editCampaign(c)}>Modifier</button>
+              <button type="button" className="lnk" onClick={() => toggleCampaign(c)}>{c.active ? 'Pause' : 'Activer'}</button>
+              <button type="button" className="lnk danger-lnk" onClick={() => deleteCampaign(c)}>Supprimer</button>
+            </span>
+          ])}
+        />
+      </section>
     </div>
   )
 }

@@ -19,6 +19,23 @@ type VttCue = {
   text: string
 }
 
+type AdDecision = {
+  mode: 'none' | 'direct' | 'vast' | 'house'
+  campaignId?: number
+  name?: string
+  advertiser?: string
+  placement?: 'preroll' | 'midroll'
+  mediaType?: 'video' | 'image'
+  mediaUrl?: string
+  clickUrl?: string
+  ctaLabel?: string
+  durationSec?: number
+  skipAfterSec?: number
+  beacons?: { impression?: string[]; complete?: string[]; click?: string[] }
+  midrollEnabled?: boolean
+  midrollIntervalMin?: number
+}
+
 const fmt = (s: number) => {
   const sec = Math.max(0, Math.floor(s))
   const h = Math.floor(sec / 3600)
@@ -113,7 +130,14 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
   const [play, setPlay] = useState(true)
   const [ui, setUi] = useState(true)
   const [menu, setMenu] = useState(false)
-  const [ad, setAd] = useState(isPremium || profile.kid || trailer ? 0 : 5)
+  const shouldCheckAds = !isPremium && !profile.kid && !trailer
+  const [ad, setAd] = useState(shouldCheckAds ? 5 : 0)
+  const [activeAd, setActiveAd] = useState<AdDecision | null>(null)
+  const [adLoading, setAdLoading] = useState(shouldCheckAds)
+  const [adElapsed, setAdElapsed] = useState(0)
+  const [adDuration, setAdDuration] = useState(5)
+  const [adMuted, setAdMuted] = useState(false)
+  const [midrollCfg, setMidrollCfg] = useState<{ enabled: boolean; intervalSec: number }>({ enabled: false, intervalSec: 1200 })
   const [aud, setAud] = useState(st.audioLang)
   const [qual, setQual] = useState(st.defaultQuality || 'Auto')
   const [speed, setSpeed] = useState(1)
@@ -122,6 +146,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
   const [nextCountdown, setNextCountdown] = useState<number | null>(null)
 
   const vref = useRef<HTMLVideoElement>(null)
+  const adVref = useRef<HTMLVideoElement>(null)
   const hlsRef = useRef<Hls | null>(null)
   const audioCtxRef = useRef<AudioContext | null>(null)
   const voiceFilterRef = useRef<BiquadFilterNode | null>(null)
@@ -130,6 +155,95 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
   const hide = useRef(0)
   const tRef = useRef(t)
   tRef.current = t
+  const midrollSlotsFiredRef = useRef<Set<number>>(new Set())
+  const adImpressionKeyRef = useRef('')
+
+  const isAdActive = adLoading || ad > 0 || (activeAd !== null && activeAd.mode !== 'none')
+
+  const sendAdEvent = (eventType: 'impression' | 'complete' | 'click' | 'skip' | 'vast_impression', item: AdDecision | null) => {
+    if (!item || item.mode === 'none' || item.mode === 'house') return
+    const beacons = eventType === 'impression' || eventType === 'vast_impression'
+      ? item.beacons?.impression
+      : eventType === 'complete'
+        ? item.beacons?.complete
+        : eventType === 'click'
+          ? item.beacons?.click
+          : undefined
+    apiPost('/api/ads?action=event', {
+      campaignId: item.campaignId || undefined,
+      titleId: id,
+      eventType: item.mode === 'vast' && eventType === 'impression' ? 'vast_impression' : eventType,
+      placement: item.placement || 'preroll',
+      beacons
+    }).catch(() => {})
+  }
+
+  const finishActiveAd = (reason: 'complete' | 'skip' | 'error') => {
+    if (activeAd && (reason === 'complete' || reason === 'skip')) {
+      sendAdEvent(reason, activeAd)
+    }
+    setActiveAd(null)
+    setAd(0)
+    setAdElapsed(0)
+    setAdLoading(false)
+    setPlay(true)
+  }
+
+  const startAdDecision = (dec: AdDecision | null) => {
+    if (!dec || dec.mode === 'none') {
+      setActiveAd(null)
+      setAd(0)
+      setAdElapsed(0)
+      setAdLoading(false)
+      return
+    }
+    const durSec = Math.max(3, Number(dec.durationSec || (dec.mode === 'house' ? 5 : 15)))
+    setActiveAd(dec)
+    setAdDuration(durSec)
+    setAdElapsed(0)
+    setAd(durSec)
+    setAdLoading(false)
+    const impKey = `${dec.mode}:${dec.campaignId || dec.mediaUrl || 'house'}:${Date.now()}`
+    if (adImpressionKeyRef.current !== impKey && (dec.mode === 'direct' || dec.mode === 'vast')) {
+      adImpressionKeyRef.current = impKey
+      sendAdEvent('impression', dec)
+    }
+  }
+
+  // Décision publicitaire pre-roll hybride (Régie directe -> VAST -> Autopromo Kora)
+  useEffect(() => {
+    midrollSlotsFiredRef.current = new Set()
+    if (!shouldCheckAds) {
+      setActiveAd(null)
+      setAd(0)
+      setAdLoading(false)
+      setMidrollCfg({ enabled: false, intervalSec: 1200 })
+      return
+    }
+    let off = false
+    setAdLoading(true)
+    setAd(5)
+    ;(async () => {
+      const r = await apiPost<AdDecision>('/api/ads?action=decision', {
+        titleId: id,
+        placement: 'preroll',
+        isKid: profile.kid,
+        isTrailer: trailer,
+        country: st.accountCountry
+      })
+      if (off) return
+      if (r.ok && r.data) {
+        setMidrollCfg({
+          enabled: Boolean(r.data.midrollEnabled),
+          intervalSec: Math.max(300, Number(r.data.midrollIntervalMin || 20) * 60)
+        })
+        startAdDecision(r.data)
+      } else {
+        startAdDecision({ mode: 'house', durationSec: 5, skipAfterSec: 0 })
+      }
+    })()
+    return () => { off = true }
+  }, [id, epNum, seasonNum, shouldCheckAds])
 
   const nextEp = it?.seasons && epNum ? episodes.find(e => e.number === epNum + 1) : undefined
 
@@ -162,7 +276,11 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       if (off) return
       if (res.ok && res.data?.url) {
         setSrc(res.data.url)
-        if (res.data.ads === false) setAd(0)
+        if (res.data.ads === false) {
+          setAd(0)
+          setActiveAd(null)
+          setAdLoading(false)
+        }
         const loadedTracks = Array.isArray(res.data.subtitles) ? res.data.subtitles : []
         setTracks(loadedTracks)
         if (loadedTracks.length && st.subLang !== 'Désactivés') {
@@ -212,7 +330,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       hls.on(Hls.Events.MANIFEST_PARSED, () => {
         const lvls = hls.levels.map(l => `${l.height}p`).reverse()
         setHlsLevels(['Auto', ...new Set(lvls)])
-        if (play && ad === 0) v.play().catch(() => setPlay(false))
+        if (play && !isAdActive) v.play().catch(() => setPlay(false))
       })
       hls.on(Hls.Events.LEVEL_SWITCHED, (_ev, data) => {
         const lvl = hls.levels[data.level]
@@ -318,11 +436,25 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
     if (idx >= 0) hls.currentLevel = idx
   }, [qual])
 
-  // Minuterie pub + mode aperçu uniquement quand aucun fichier vidéo n'existe
+  // Minuterie pub (image / autopromo / sécurité vidéo) + mode aperçu uniquement quand aucun fichier vidéo n'existe
   useEffect(() => {
     const h = window.setInterval(() => {
-      if (ad > 0) setAd(a => Math.max(0, a - 1))
-      else if (play && !src && !streamErr) {
+      if (activeAd && activeAd.mode === 'house') {
+        setAd(a => {
+          if (a <= 1) {
+            setActiveAd(null)
+            return 0
+          }
+          return a - 1
+        })
+      } else if (activeAd && (activeAd.mode === 'direct' || activeAd.mode === 'vast') && activeAd.mediaType === 'image') {
+        setAdElapsed(el => {
+          const next = el + 1
+          setAd(Math.max(0, adDuration - next))
+          if (next >= adDuration) finishActiveAd('complete')
+          return next
+        })
+      } else if (!isAdActive && play && !src && !streamErr) {
         setT(x => {
           const next = Math.min(total, x + speed)
           if (next >= total) setPlay(false)
@@ -331,19 +463,60 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       }
     }, 1000)
     return () => clearInterval(h)
-  }, [play, ad, total, speed, src, streamErr])
+  }, [play, isAdActive, activeAd, adDuration, total, speed, src, streamErr])
 
-  // Synchronisation lecture, vitesse et volume sur <video>
+  // Déclenchement automatique des pauses publicitaires en milieu de film (Mid-roll) si activé
+  useEffect(() => {
+    if (!shouldCheckAds || !midrollCfg.enabled || isAdActive || !src || streamErr) return
+    if (total < midrollCfg.intervalSec + 180) return
+    const slot = Math.floor(t / midrollCfg.intervalSec)
+    if (slot < 1 || midrollSlotsFiredRef.current.has(slot)) return
+    midrollSlotsFiredRef.current.add(slot)
+    ;(async () => {
+      const r = await apiPost<AdDecision>('/api/ads?action=decision', {
+        titleId: id,
+        placement: 'midroll',
+        isKid: profile.kid,
+        isTrailer: trailer,
+        country: st.accountCountry
+      })
+      if (r.ok && r.data && (r.data.mode === 'direct' || r.data.mode === 'vast')) {
+        startAdDecision(r.data)
+      }
+    })()
+  }, [Math.floor(t / 15), shouldCheckAds, midrollCfg.enabled, midrollCfg.intervalSec, isAdActive, src, total, streamErr])
+
+  // Synchronisation lecture, vitesse et volume sur <video> principal
   useEffect(() => {
     const v = vref.current
     if (!v || !src) return
-    if (play && ad === 0) {
+    if (play && !isAdActive) {
       if (audioCtxRef.current?.state === 'suspended') audioCtxRef.current.resume().catch(() => {})
       v.play().catch(() => setPlay(false))
     } else {
       v.pause()
     }
-  }, [play, ad, src])
+  }, [play, isAdActive, src])
+
+  // Démarrage automatique de la vidéo publicitaire (avec repli muet si le navigateur bloque le son)
+  useEffect(() => {
+    const av = adVref.current
+    if (!av || !activeAd || (activeAd.mode !== 'direct' && activeAd.mode !== 'vast') || activeAd.mediaType !== 'video') return
+    av.muted = adMuted
+    av.volume = adMuted ? 0 : vol
+    av.play().catch(() => {
+      av.muted = true
+      setAdMuted(true)
+      av.play().catch(() => finishActiveAd('error'))
+    })
+  }, [activeAd?.mediaUrl, activeAd?.campaignId])
+
+  useEffect(() => {
+    if (adVref.current) {
+      adVref.current.muted = adMuted
+      adVref.current.volume = adMuted ? 0 : vol
+    }
+  }, [adMuted, vol])
 
   useEffect(() => { if (vref.current) vref.current.playbackRate = speed }, [speed, src])
   useEffect(() => {
@@ -355,14 +528,14 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
 
   // Sauvegarde automatique de la progression toutes les 5 secondes
   useEffect(() => {
-    if (!trailer && ad === 0 && t > 4 && !streamErr) {
+    if (!trailer && !isAdActive && t > 4 && !streamErr) {
       progress(id, Math.floor(t), epNum ? seasonNum : undefined, epNum || undefined)
     }
   }, [Math.floor(t / 5)])
 
   // Compte à rebours épisode suivant automatique
   useEffect(() => {
-    if (!nextEp || st.autoNext === false || trailer || ad > 0) return
+    if (!nextEp || st.autoNext === false || trailer || isAdActive) return
     if (t >= total - 1 && nextCountdown === null) setNextCountdown(8)
   }, [t >= total - 1, nextEp?.number])
 
@@ -444,6 +617,11 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
     const onKey = (e: KeyboardEvent) => {
       if (!it || (e.target as HTMLElement).matches?.('input,select,textarea,button')) return
       const key = e.key.toLowerCase()
+      if (isAdActive) {
+        if (key === 'm') setAdMuted(m => !m)
+        else if (key === 'f') fs()
+        return
+      }
       if (e.key === ' ' || key === 'k') { e.preventDefault(); setPlay(p => !p); wake() }
       else if (e.key === 'ArrowRight' || key === 'l') { e.preventDefault(); seek(tRef.current + 10) }
       else if (e.key === 'ArrowLeft' || key === 'j') { e.preventDefault(); seek(tRef.current - 10) }
@@ -480,7 +658,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
       <div className="stage" ref={stage} onMouseMove={wake} onClick={e => { if (e.target === e.currentTarget) setPlay(p => !p); wake() }}>
         {(!src || !videoReady) && <Poster item={it} wide />}
 
-        {!src && !streamErr && ad === 0 && (
+        {!src && !streamErr && !isAdActive && (
           <div className={'demo-reel' + (play ? ' playing' : '')} aria-hidden="true">
             <span className="reel-beam" />
             <div className="reel-badge">
@@ -518,7 +696,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
           />
         )}
 
-        {buffering && src && !streamErr && ad === 0 && (
+        {buffering && src && !streamErr && !isAdActive && (
           <div className="player-buffer" role="status" aria-label="Mise en mémoire tampon">
             <span className="spinner" />
           </div>
@@ -533,7 +711,104 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
               <a className="btn" href={`#/titre/${id}`}>Retour à la fiche</a>
             </div>
           </div>
-        ) : ad > 0 ? (
+        ) : adLoading ? (
+          <div className="ad" role="status">
+            <span className="spinner" />
+            <span>Préparation de votre séance…</span>
+          </div>
+        ) : activeAd && (activeAd.mode === 'direct' || activeAd.mode === 'vast') && activeAd.mediaUrl ? (
+          <div className="ad-stage" role="region" aria-label="Publicité en cours">
+            {activeAd.mediaType === 'image' ? (
+              <img
+                className="ad-media"
+                src={activeAd.mediaUrl}
+                alt={activeAd.name || 'Publicité'}
+                onError={() => finishActiveAd('error')}
+              />
+            ) : (
+              <video
+                ref={adVref}
+                className="ad-media"
+                src={activeAd.mediaUrl}
+                playsInline
+                autoPlay
+                muted={adMuted}
+                onLoadedMetadata={e => {
+                  const d = Math.round(e.currentTarget.duration || 0)
+                  if (d >= 3 && d <= 120) {
+                    setAdDuration(d)
+                    setAd(d)
+                  }
+                }}
+                onTimeUpdate={e => {
+                  const cur = e.currentTarget.currentTime
+                  const d = e.currentTarget.duration || adDuration
+                  setAdElapsed(cur)
+                  setAd(Math.max(0, Math.ceil(d - cur)))
+                }}
+                onEnded={() => finishActiveAd('complete')}
+                onError={() => finishActiveAd('error')}
+              />
+            )}
+
+            <div className="ad-hud-top">
+              <div className="ad-badge-row">
+                <span className="ad-pill">Publicité · {activeAd.advertiser || 'Sponsor'}</span>
+                <span className="ad-timer">{fmt(Math.max(0, ad))}</span>
+              </div>
+              <div className="ad-top-actions">
+                {activeAd.mediaType !== 'image' && (
+                  <button
+                    type="button"
+                    className="icon-btn"
+                    onClick={() => setAdMuted(m => !m)}
+                    aria-label={adMuted ? 'Activer le son de la publicité' : 'Couper le son de la publicité'}
+                  >
+                    <Icon n={adMuted ? 'mute' : 'vol'} />
+                  </button>
+                )}
+                <a className="ad-prem-link" href="#/abonnement">Sans pub · Kora Premium</a>
+              </div>
+            </div>
+
+            <div className="ad-hud-bottom">
+              <div>
+                {activeAd.clickUrl && (
+                  <a
+                    className="btn p ad-cta-btn"
+                    href={activeAd.clickUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={() => sendAdEvent('click', activeAd)}
+                  >
+                    {activeAd.ctaLabel || 'En savoir plus'} ↗
+                  </a>
+                )}
+              </div>
+              <div>
+                {activeAd.skipAfterSec && activeAd.skipAfterSec > 0 ? (
+                  adElapsed >= activeAd.skipAfterSec ? (
+                    <button type="button" className="ad-skip-btn ready" onClick={() => finishActiveAd('skip')}>
+                      Ignorer la publicité →
+                    </button>
+                  ) : (
+                    <span className="ad-skip-btn">
+                      Ignorer dans {Math.max(1, Math.ceil(activeAd.skipAfterSec - adElapsed))} s
+                    </span>
+                  )
+                ) : (
+                  <span className="ad-skip-btn">
+                    Votre vidéo reprend dans {Math.max(1, ad)} s
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="ad-progress">
+              <span style={{ width: `${Math.min(100, adDuration > 0 ? (adElapsed / adDuration) * 100 : 0)}%` }} />
+            </div>
+          </div>
+        ) : isAdActive ? (
           <div className="ad" role="status">
             <span className="ad-pill">Sponsorisé · Formule gratuite</span>
             <b>Votre séance commence dans {ad} s</b>
@@ -684,7 +959,7 @@ export function Player({ id, q }: { id: number; q: URLSearchParams }) {
           </div>
         )}
 
-        {activeCueText && ad === 0 && !streamErr && (
+        {activeCueText && !isAdActive && !streamErr && (
           <p className="sub" style={{ fontSize: subFontSize }} aria-live="polite">
             <span>{activeCueText}</span>
           </p>

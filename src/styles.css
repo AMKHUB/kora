@@ -1035,3 +1035,137 @@ tbody tr:hover { background: rgba(242, 195, 52, 0.04); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
+
+
+/* ============================================================================
+   LECTEUR PUBLICITAIRE HYBRIDE (PRE-ROLL / MID-ROLL / IGNORER / CTA)
+   ============================================================================ */
+.ad-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  background: #000;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+}
+
+.ad-media {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+
+.ad-hud-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.78), transparent);
+}
+
+.ad-badge-row,
+.ad-top-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ad-timer {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+.ad-prem-link {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #f2c334;
+  background: rgba(18, 16, 12, 0.82);
+  border: 1px solid rgba(242, 195, 52, 0.35);
+  padding: 6px 12px;
+  border-radius: 999px;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+.ad-prem-link:hover {
+  background: rgba(242, 195, 52, 0.2);
+}
+
+.ad-hud-bottom {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px 10px;
+  background: linear-gradient(0deg, rgba(0, 0, 0, 0.82), transparent);
+  flex-wrap: wrap;
+}
+
+.ad-cta-btn {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.ad-skip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  background: rgba(14, 14, 18, 0.88);
+  color: #edece8;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(8px);
+}
+
+.ad-skip-btn.ready {
+  background: #f2c334;
+  color: #111111;
+  border-color: #f2c334;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease;
+}
+
+.ad-skip-btn.ready:hover {
+  filter: brightness(1.06);
+  transform: translateY(-1px);
+}
+
+.ad-progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  z-index: 3;
+}
+
+.ad-progress > span {
+  display: block;
+  height: 100%;
+  background: #f2c334;
+  transition: width 0.25s linear;
+}

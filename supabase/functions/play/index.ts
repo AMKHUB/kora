@@ -125,7 +125,7 @@ Deno.serve(async (req) => {
     }
     const { data: r2Cfg } = await db.from('private_r2_config').select('account_id,bucket_name,access_key_id,secret_access_key').eq('id', 1).maybeSingle()
     if (!r2Cfg?.access_key_id || !r2Cfg?.secret_access_key) {
-      return json({ error: 'Cloudflare R2 non configuré' }, 503)
+      return json({ error: 'Stockage vidéo non configuré' }, 503)
     }
     const signedUrl = await signR2S3Url(r2Cfg, 'PUT', cleanKey, 7200)
     return json({ signedUrl, storagePath: `r2:${cleanKey}`, provider: 'r2' })

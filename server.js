@@ -11,6 +11,7 @@ import playHandler from './api/play.js'
 import subtitlesHandler from './api/subtitles.js'
 import studioHandler from './api/studio.js'
 import adminHandler from './api/admin.js'
+import adsHandler from './api/ads.js'
 
 const dist = path.join(path.dirname(fileURLToPath(import.meta.url)), 'dist')
 const PORT = process.env.PORT || 3000
@@ -30,10 +31,10 @@ const CSP = [
   "default-src 'self'",
   "script-src 'self' https://plausible.io",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.r2.cloudflarestorage.com https://*.r2.dev https://*.workers.dev https://plausible.io",
-  "img-src 'self' data: blob: https://*.supabase.co",
+  "img-src 'self' data: blob: https:",
   "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "font-src 'self' https://fonts.gstatic.com data:",
-  "media-src 'self' blob: https://*.supabase.co https://*.r2.cloudflarestorage.com https://*.r2.dev https://*.workers.dev",
+  "media-src 'self' blob: https:",
   "object-src 'none'",
   "form-action 'self'",
   "frame-ancestors 'none'",
@@ -79,6 +80,7 @@ app.post('/api/play', (req, res) => playHandler(req, res))
 app.all('/api/subtitles', (req, res) => subtitlesHandler(req, res))
 app.all('/api/studio', (req, res) => studioHandler(req, res))
 app.all('/api/admin', (req, res) => adminHandler(req, res))
+app.all('/api/ads', (req, res) => adsHandler(req, res))
 app.all('/api/checkout', (req, res) => checkoutHandler(req, res))
 app.post('/api/webhooks/saspay', (req, res) => checkoutHandler(req, res))
 app.use('/api', (_req, res) => res.status(404).json({ error: 'not_found' }))
