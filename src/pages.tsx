@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AVATARS, Episode, Item, PLANS, PlanId, Profile as ProfileType, ThemeMode, useApp } from './store'
 import { BrandLogo, Card, Icon, Meta, Modal, PinModal, Poster, ProfileAvatar, Row } from './ui'
 import { AccountBox, AccountSummary } from './auth'
@@ -49,7 +49,7 @@ function Footer() {
         <p className="mu">La maison du cinéma malien, africain et de la diaspora.</p>
       </div>
       <nav className="foot-links" aria-label="Liens de pied de page">
-        <a href="#/categories">Explorer</a>
+        <a href="#/explorer">Explorer</a>
         <a href="#/abonnement">Offres & tarifs</a>
         <a href="#/profil">Mon profil</a>
         <a href="#/parametres">Paramètres</a>
@@ -76,7 +76,7 @@ const HOME_FILTERS = [
 ] as const
 
 export function Home() {
-  const { cat, items, byId, profile, isPremium, role, session } = useApp()
+  const { cat, items, byId, profile, session } = useApp()
   const [filter, setFilter] = useState<string>('all')
   const [heroIdx, setHeroIdx] = useState(0)
   const [paused, setPaused] = useState(false)
@@ -107,11 +107,10 @@ export function Home() {
             </p>
             <div className="btns" style={{ justifyContent: 'center' }}>
               {!session ? (
-                <a className="btn p" href="#/connexion"><Icon n="user" s={18} />Se connecter / Créer un compte</a>
+                <a className="btn p" href="#/connexion"><Icon n="user" s={18} />Se connecter</a>
               ) : (
                 <a className="btn p" href="/studio/" target="_blank" rel="noopener noreferrer"><Icon n="studio" s={18} />Ouvrir Kora Studio</a>
               )}
-              <a className="btn" href="/studio/" target="_blank" rel="noopener noreferrer"><Icon n="film" s={18} />Découvrir Kora Studio</a>
             </div>
             <div className="empty-pillars">
               <div className="pillar-card">
@@ -139,24 +138,11 @@ export function Home() {
 
   const hero = heroes[heroIdx % heroes.length] || items[0]
   const cont = session ? Object.keys(profile.hist).map(Number).filter(id => byId(id) && profile.hist[id] > 10) : []
-  const src = session ? byId(cont[cont.length - 1] || 0) : undefined
-
-  // Moteur de recommandation pondéré (genres, réalisateurs et pays appréciés)
-  const seen = new Set([...cont, ...profile.list])
-  const gw: Record<string, number> = {}
-  const dw: Record<string, number> = {}
-  items.filter(i => seen.has(i.id) || profile.rate?.[i.id] === 'like' || profile.rate?.[i.id] === 'love').forEach(i => {
-    const mult = profile.rate?.[i.id] === 'love' ? 3 : profile.rate?.[i.id] === 'like' ? 2 : 1
-    i.genres.forEach(g => { gw[g] = (gw[g] || 0) + mult })
-    if (i.director) dw[i.director] = (dw[i.director] || 0) + mult
-  })
-  const reco = items
-    .filter(i => !seen.has(i.id) && profile.rate?.[i.id] !== 'no')
-    .map(i => [i.id, i.genres.reduce((a, g) => a + (gw[g] || 0), 0) + (dw[i.director] || 0) * 2] as const)
-    .filter(x => x[1] > 0)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 10)
-    .map(x => x[0])
+  const featuredAfrica = [...new Set([
+    ...(cat.rows.series || []),
+    ...(cat.rows.malifilms || []),
+    ...(cat.rows.africa || [])
+  ])]
 
   const filteredItems = filter === 'all'
     ? []
@@ -180,9 +166,6 @@ export function Home() {
         <div className="txt">
           <div className="hero-badges">
             <span className="pill-accent">{hero.badge || `${TYPE_LABEL[hero.type]} · À la une`}</span>
-            {hero.quality === '4K' && <span className="pill-spec">4K</span>}
-            {hero.hdr && <span className="pill-spec">HDR</span>}
-            {hero.audioDesc && <span className="pill-spec" title="Audiodescription disponible">AD</span>}
             <span className="pill-spec">{hero.age}</span>
           </div>
           <h1>{hero.title}</h1>
@@ -193,9 +176,8 @@ export function Home() {
           <div className="btns">
             <a className="btn p" href={session ? `#/lire/${hero.id}` : '#/connexion'}>
               <Icon n={session ? 'play' : 'lock'} s={18} />
-              {!session ? 'Se connecter pour lire' : heroSaved > 30 ? `Reprendre (${fmtShort(heroSaved)})` : 'Lire'}
+              {!session ? 'Lire' : heroSaved > 30 ? `Reprendre (${fmtShort(heroSaved)})` : 'Lire'}
             </a>
-            {session && <ListBtn id={hero.id} />}
             <a className="btn" href={`#/titre/${hero.id}`}><Icon n="info" s={18} />Plus d’infos</a>
           </div>
         </div>
@@ -258,34 +240,10 @@ export function Home() {
         ) : (
           <>
             <Row title="Continuer à regarder" ids={cont} showProgress />
-            <Row title="Top 10 au Mali" ids={cat.rows.top10 || []} ranked />
-            <Row title="Tendances au Mali" ids={cat.rows.trending || []} action={{ label: 'Tout explorer', href: '#/categories/pays/Mali' }} />
+            <Row title="Top 10 sur Kora" ids={cat.rows.top10 || []} ranked />
+            <Row title="Tendances du moment" ids={cat.rows.trending || []} action={{ label: 'Tout explorer', href: '#/explorer' }} />
             <Row title="Nouveautés" ids={cat.rows.new || []} />
-            <Row title="Recommandés pour vous" ids={reco} />
-            <Row title="Séries originales & populaires" ids={cat.rows.series || []} />
-            <Row title="Films maliens" ids={cat.rows.malifilms || []} />
-            <Row title="Populaire en Afrique" ids={cat.rows.africa || []} />
-            <Row title="Documentaires" ids={cat.rows.docs || []} action={{ label: 'Tout voir', href: '#/categories/genre/Documentaire' }} />
-            <Row title="Courts-métrages & Animation" ids={cat.rows.shorts || []} />
-            <Row title="Classiques restaurés du cinéma africain" ids={cat.rows.classics || []} />
-            <Row title="Sélection de la semaine" ids={cat.rows.pick || []} />
-            {src && (
-              <Row
-                title={`Parce que vous avez regardé ${src.title}`}
-                ids={items.filter(i => i.id !== src.id && i.genres.some(g => src.genres.includes(g))).map(i => i.id)}
-              />
-            )}
-
-            {!isPremium && !profile.kid && (
-              <section className="promo-strip">
-                <div>
-                  <span className="pill-accent">Kora Premium & Famille</span>
-                  <h2>Le cinéma africain sans publicité, jusqu’en 4K HDR</h2>
-                  <p className="mu">À partir de 2 500 FCFA / mois. Paiement simple par Orange Money, Moov Money, Wave ou carte bancaire.</p>
-                </div>
-                <a className="btn p" href="#/abonnement"><Icon n="crown" s={18} />Voir les formules</a>
-              </section>
-            )}
+            <Row title="Séries & Films d’Afrique" ids={featuredAfrica} action={{ label: 'Explorer le catalogue', href: '#/explorer' }} />
           </>
         )}
       </div>
@@ -296,26 +254,58 @@ export function Home() {
 }
 
 /* ============================================================================
-   RECHERCHE AVANCÉE — Multi-filtres (type, pays, genre, langue, âge, durée, tri)
+   EXPLORER & RECHERCHE UNIFIÉE — Carrousel de suggestions + Multi-filtres stylés
    ============================================================================ */
-export function Search({ q0 }: { q0: string }) {
+const POPULAR_SUGGESTIONS: { label: string; sub: string; tone: string; filter?: { type?: string; country?: string; genre?: string; lang?: string; q?: string } }[] = [
+  { label: 'Cinéma du Mali', sub: 'Films & séries maliens', tone: 'gold', filter: { country: 'Mali' } },
+  { label: 'Bambara', sub: 'Version originale', tone: 'emerald', filter: { lang: 'Bambara' } },
+  { label: 'Séries africaines', sub: 'Saisons & épisodes', tone: 'rose', filter: { type: 'serie' } },
+  { label: 'Sénégal', sub: 'Dakar & Teranga', tone: 'amber', filter: { country: 'Sénégal' } },
+  { label: 'Documentaires', sub: 'Histoire, culture & société', tone: 'cyan', filter: { type: 'doc' } },
+  { label: 'Côte d’Ivoire', sub: 'Abidjan & créations', tone: 'copper', filter: { country: 'Côte d’Ivoire' } },
+  { label: 'Drame & Émotion', sub: 'Grandes histoires', tone: 'violet', filter: { genre: 'Drame' } },
+  { label: 'Comédie', sub: 'Humour & famille', tone: 'gold', filter: { genre: 'Comédie' } },
+  { label: 'Diaspora', sub: 'Paris, Bruxelles, Montréal', tone: 'indigo', filter: { country: 'Diaspora' } },
+  { label: 'Animation & Jeunesse', sub: 'Contes & légendes', tone: 'emerald', filter: { genre: 'Animation' } },
+  { label: 'Wolof', sub: 'Version originale', tone: 'amber', filter: { lang: 'Wolof' } },
+  { label: 'Classiques restaurés', sub: 'Patrimoine du continent', tone: 'rose', filter: { q: 'Classique' } }
+]
+
+export function Search({
+  q0 = '',
+  type0 = '',
+  country0 = '',
+  genre0 = '',
+  lang0 = ''
+}: {
+  q0?: string
+  type0?: string
+  country0?: string
+  genre0?: string
+  lang0?: string
+}) {
   const { items, st, addRecentSearch, profile } = useApp()
   const [q, setQ] = useState(q0)
-  const [type, setType] = useState('')
-  const [country, setCountry] = useState('')
-  const [genre, setGenre] = useState('')
-  const [lang, setLang] = useState('')
+  const [type, setType] = useState(type0)
+  const [country, setCountry] = useState(country0)
+  const [genre, setGenre] = useState(genre0)
+  const [lang, setLang] = useState(lang0)
   const [age, setAge] = useState('')
   const [dur, setDur] = useState('')
   const [era, setEra] = useState('')
   const [sort, setSort] = useState('relevance')
-  const [showFilters, setShowFilters] = useState(false)
+  const [showFilters, setShowFilters] = useState(true)
+  const suggestRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { setQ(q0) }, [q0])
+  useEffect(() => { setType(type0) }, [type0])
+  useEffect(() => { setCountry(country0) }, [country0])
+  useEffect(() => { setGenre(genre0) }, [genre0])
+  useEffect(() => { setLang(lang0) }, [lang0])
 
-  const countries = useMemo(() => [...new Set(items.map(i => i.country))].sort(), [items])
-  const genres = useMemo(() => [...new Set(items.flatMap(i => i.genres))].sort(), [items])
-  const langs = useMemo(() => [...new Set(items.flatMap(i => i.langs))].sort(), [items])
+  const countries = useMemo(() => [...new Set(['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Nigeria', 'Diaspora', ...items.map(i => i.country)])].sort(), [items])
+  const genres = useMemo(() => [...new Set(['Drame', 'Comédie', 'Documentaire', 'Action', 'Animation', 'Histoire', 'Musique', ...items.flatMap(i => i.genres)])].sort(), [items])
+  const langs = useMemo(() => [...new Set(['Bambara', 'Français', 'Wolof', 'Peul', 'Anglais', ...items.flatMap(i => i.langs)])].sort(), [items])
 
   const activeFilters = [type, country, genre, lang, age, dur, era].filter(Boolean).length
 
@@ -345,15 +335,36 @@ export function Search({ q0 }: { q0: string }) {
     return list
   }, [items, toks, type, country, genre, lang, age, dur, era, sort, hasQuery])
 
-  const resetAll = () => { setType(''); setCountry(''); setGenre(''); setLang(''); setAge(''); setDur(''); setEra(''); setSort('relevance') }
+  const resetAll = () => {
+    setType(''); setCountry(''); setGenre(''); setLang(''); setAge(''); setDur(''); setEra(''); setSort('relevance')
+  }
+
+  const applySuggestion = (s: typeof POPULAR_SUGGESTIONS[number]) => {
+    resetAll()
+    setQ(s.filter?.q || '')
+    if (s.filter?.type) setType(s.filter.type)
+    if (s.filter?.country) setCountry(s.filter.country)
+    if (s.filter?.genre) setGenre(s.filter.genre)
+    if (s.filter?.lang) setLang(s.filter.lang)
+    addRecentSearch(s.label)
+  }
+
+  const scrollSuggestions = (dir: -1 | 1) => {
+    const el = suggestRef.current
+    if (!el) return
+    el.scrollBy({ left: dir * Math.max(260, el.clientWidth * 0.72), behavior: 'smooth' })
+  }
 
   return (
     <div className="page">
       <div className="page-head">
-        <h1>Rechercher</h1>
-        <button type="button" className={'btn' + (activeFilters ? ' active-btn' : '')} onClick={() => setShowFilters(s => !s)}>
+        <div>
+          <h1>Explorer</h1>
+          <p className="mu">Recherchez une œuvre ou filtrez le catalogue par genre, pays, langue et format.</p>
+        </div>
+        <button type="button" className={'btn' + (showFilters || activeFilters ? ' active-btn' : '')} onClick={() => setShowFilters(s => !s)}>
           <Icon n="sliders" s={18} />
-          Filtres {activeFilters > 0 && `(${activeFilters})`}
+          Filtrer {activeFilters > 0 && `(${activeFilters})`}
         </button>
       </div>
 
@@ -361,80 +372,136 @@ export function Search({ q0 }: { q0: string }) {
         <Icon n="search" s={20} />
         <input
           className="field"
-          autoFocus
           type="search"
           value={q}
           onChange={e => setQ(e.target.value)}
           onBlur={() => addRecentSearch(q)}
           placeholder="Titre, réalisateur, acteur, pays, langue, genre…"
-          aria-label="Rechercher dans le catalogue Kora"
+          aria-label="Explorer le catalogue Kora"
         />
+        {(q || activeFilters > 0) && (
+          <button type="button" className="btn" onClick={() => { setQ(''); resetAll() }}>
+            Effacer
+          </button>
+        )}
       </form>
 
       {showFilters && (
-        <section className="filter-panel" aria-label="Filtres avancés">
-          <div className="inline">
-            <label>Type
+        <section className="filter-panel" aria-label="Filtres du catalogue">
+          <div className="filter-panel-head">
+            <span className="filter-title"><Icon n="sliders" s={16} />Filtrer le catalogue</span>
+            {activeFilters > 0 && (
+              <button type="button" className="lnk small-lnk" onClick={resetAll}>
+                Réinitialiser ({activeFilters})
+              </button>
+            )}
+          </div>
+          <div className="filter-grid">
+            <label className={'filter-item tone-gold' + (type ? ' has-val' : '')}>
+              <span>Format</span>
               <select value={type} onChange={e => setType(e.target.value)}>
-                <option value="">Tous</option>
+                <option value="">Tous les formats</option>
                 <option value="film">Films</option>
                 <option value="serie">Séries</option>
                 <option value="doc">Documentaires</option>
                 <option value="court">Courts-métrages</option>
               </select>
             </label>
-            <label>Pays
+            <label className={'filter-item tone-emerald' + (country ? ' has-val' : '')}>
+              <span>Pays & origine</span>
               <select value={country} onChange={e => setCountry(e.target.value)}>
-                <option value="">Tous</option>
-                {countries.map(c => <option key={c}>{c}</option>)}
+                <option value="">Tous les pays</option>
+                {countries.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </label>
-            <label>Genre
+            <label className={'filter-item tone-rose' + (genre ? ' has-val' : '')}>
+              <span>Genre</span>
               <select value={genre} onChange={e => setGenre(e.target.value)}>
-                <option value="">Tous</option>
-                {genres.map(g => <option key={g}>{g}</option>)}
+                <option value="">Tous les genres</option>
+                {genres.map(g => <option key={g} value={g}>{g}</option>)}
               </select>
             </label>
-            <label>Langue
+            <label className={'filter-item tone-amber' + (lang ? ' has-val' : '')}>
+              <span>Langue audio</span>
               <select value={lang} onChange={e => setLang(e.target.value)}>
-                <option value="">Toutes</option>
-                {langs.map(l => <option key={l}>{l}</option>)}
+                <option value="">Toutes les langues</option>
+                {langs.map(l => <option key={l} value={l}>{l}</option>)}
               </select>
             </label>
-            <label>Âge
+            <label className={'filter-item tone-cyan' + (age ? ' has-val' : '')}>
+              <span>Public / Âge</span>
               <select value={age} onChange={e => setAge(e.target.value)}>
-                <option value="">Tous</option>
-                {['Tous', '7+', '12+', '16+'].map(a => <option key={a}>{a}</option>)}
+                <option value="">Tous publics</option>
+                {['Tous', '7+', '12+', '16+'].map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </label>
-            <label>Durée
+            <label className={'filter-item tone-violet' + (dur ? ' has-val' : '')}>
+              <span>Durée</span>
               <select value={dur} onChange={e => setDur(e.target.value)}>
-                <option value="">Toutes</option>
+                <option value="">Toutes durées</option>
                 <option value="short">Moins de 30 min</option>
                 <option value="mid">30 à 90 min</option>
                 <option value="long">Plus de 90 min</option>
               </select>
             </label>
-            <label>Époque
+            <label className={'filter-item tone-copper' + (era ? ' has-val' : '')}>
+              <span>Période</span>
               <select value={era} onChange={e => setEra(e.target.value)}>
-                <option value="">Toutes</option>
+                <option value="">Toutes époques</option>
                 <option value="2020s">Années 2020</option>
                 <option value="classic">Classiques (&lt; 2000)</option>
               </select>
             </label>
-            <label>Trier par
+            <label className={'filter-item tone-indigo' + (sort !== 'relevance' ? ' has-val' : '')}>
+              <span>Trier par</span>
               <select value={sort} onChange={e => setSort(e.target.value)}>
                 <option value="relevance">Pertinence</option>
                 <option value="newest">Plus récents</option>
                 <option value="oldest">Plus anciens</option>
                 <option value="duration">Durée</option>
-                <option value="alpha">Ordre alphabétique</option>
+                <option value="alpha">Ordre A–Z</option>
               </select>
             </label>
           </div>
-          {activeFilters > 0 && <button type="button" className="lnk" onClick={resetAll}>Réinitialiser les filtres</button>}
         </section>
       )}
+
+      <section className="suggest-sec" aria-label="Suggestions populaires">
+        <div className="row-head">
+          <h2>Suggestions populaires</h2>
+          <div className="suggest-arrows">
+            <button type="button" className="icon-btn" onClick={() => scrollSuggestions(-1)} aria-label="Défiler les suggestions vers la gauche">
+              <Icon n="chevL" s={18} />
+            </button>
+            <button type="button" className="icon-btn" onClick={() => scrollSuggestions(1)} aria-label="Défiler les suggestions vers la droite">
+              <Icon n="chevR" s={18} />
+            </button>
+          </div>
+        </div>
+        <div className="suggest-wrap">
+          <div className="suggest-track" ref={suggestRef}>
+            {POPULAR_SUGGESTIONS.map(s => {
+              const isSelected =
+                (s.filter?.country && country === s.filter.country) ||
+                (s.filter?.type && type === s.filter.type) ||
+                (s.filter?.genre && genre === s.filter.genre) ||
+                (s.filter?.lang && lang === s.filter.lang) ||
+                (s.filter?.q && q === s.filter.q)
+              return (
+                <button
+                  key={s.label}
+                  type="button"
+                  className={`suggest-card tone-${s.tone}` + (isSelected ? ' on' : '')}
+                  onClick={() => applySuggestion(s)}
+                >
+                  <span className="suggest-kicker">{s.sub}</span>
+                  <strong>{s.label}</strong>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      </section>
 
       {!hasQuery ? (
         <div className="search-hints">
@@ -449,16 +516,8 @@ export function Search({ q0 }: { q0: string }) {
             </section>
           )}
           <section>
-            <h2>Suggestions populaires</h2>
-            <div className="chips">
-              {['Bambara', 'Mali', 'Sénégal', 'Documentaire', 'Animation', 'Classique', 'Boubacar Dembélé', 'Diaspora', 'Wolof'].map(s => (
-                <button key={s} type="button" className="chip" onClick={() => { setQ(s); addRecentSearch(s) }}>{s}</button>
-              ))}
-            </div>
-          </section>
-          <section>
             <h2>À découvrir maintenant</h2>
-            <div className="grid flush">{items.slice(0, 10).map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
+            <div className="grid flush">{items.slice(0, 12).map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
           </section>
         </div>
       ) : (
@@ -467,67 +526,12 @@ export function Search({ q0 }: { q0: string }) {
           {!res.length && (
             <div className="empty-box">
               <p>Aucun titre ne correspond à ces critères.</p>
-              <button type="button" className="btn" onClick={() => { setQ(''); resetAll() }}>Effacer la recherche</button>
+              <button type="button" className="btn" onClick={() => { setQ(''); resetAll() }}>Effacer les filtres</button>
             </div>
           )}
           <div className="grid flush">{res.map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
         </section>
       )}
-    </div>
-  )
-}
-
-/* ============================================================================
-   CATÉGORIES — Pays, Genres, Langues
-   ============================================================================ */
-const CATS: [string, string, string[]][] = [
-  ['pays', 'Pays & Territoires', ['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Nigeria', 'Ghana', 'Afrique du Sud', 'Diaspora']],
-  ['genre', 'Genres', ['Drame', 'Comédie', 'Romance', 'Action', 'Documentaire', 'Animation', 'Histoire', 'Musique', 'Jeunesse']],
-  ['langue', 'Langues originales', ['Bambara', 'Français', 'Anglais', 'Wolof', 'Peul', 'Arabe']]
-]
-
-export function Categories({ kind, val }: { kind?: string; val?: string }) {
-  const { items, profile } = useApp()
-  const v = val && decodeURIComponent(val)
-  const countFor = (k: string, x: string) => items.filter(i => k === 'pays' ? i.country === x : k === 'genre' ? i.genres.includes(x) : i.langs.includes(x)).length
-  const res = items.filter(i => kind === 'pays' ? i.country === v : kind === 'genre' ? i.genres.includes(v!) : kind === 'langue' ? i.langs.includes(v!) : false)
-
-  return (
-    <div className="page">
-      <h1>Explorer le catalogue</h1>
-      <p className="mu">Parcourez les cinémas du continent par pays, genre ou langue originale.</p>
-
-      {kind && v && (
-        <section className="cat-result">
-          <div className="row-head">
-            <h2>{v} ({res.length})</h2>
-            <a className="lnk" href="#/categories">Toutes les catégories</a>
-          </div>
-          {!res.length && <p className="mu">Aucun contenu disponible pour ce profil.</p>}
-          <div className="grid flush">{res.map(i => <Card key={i.id} item={i} progressSec={profile.hist[i.id]} />)}</div>
-        </section>
-      )}
-
-      {CATS.map(([k, t, vs]) => (
-        <section key={k} className="cat-group">
-          <h2>{t}</h2>
-          <div className="cat-cards">
-            {vs.map(x => {
-              const n = countFor(k, x)
-              return (
-                <a
-                  key={x}
-                  className={'cat-card' + (k === kind && x === v ? ' on' : '')}
-                  href={`#/categories/${k}/${encodeURIComponent(x)}`}
-                >
-                  <strong>{x}</strong>
-                  <small className="mu">{n} titre{n > 1 ? 's' : ''}</small>
-                </a>
-              )
-            })}
-          </div>
-        </section>
-      ))}
     </div>
   )
 }
@@ -676,18 +680,18 @@ export function Detail({ id }: { id: number }) {
 
         <dl className="meta-grid">
           <dt>Réalisation</dt>
-          <dd><a className="lnk" href={`#/recherche?q=${encodeURIComponent(it.director)}`}>{it.director}</a></dd>
+          <dd><a className="lnk" href={`#/explorer?q=${encodeURIComponent(it.director)}`}>{it.director}</a></dd>
           <dt>Distribution</dt>
           <dd className="cast-list">
             {it.cast.map((actor, idx) => (
               <span key={actor}>
-                <a className="lnk" href={`#/recherche?q=${encodeURIComponent(actor)}`}>{actor}</a>
+                <a className="lnk" href={`#/explorer?q=${encodeURIComponent(actor)}`}>{actor}</a>
                 {idx < it.cast.length - 1 ? ', ' : ''}
               </span>
             ))}
           </dd>
           <dt>Pays</dt>
-          <dd><a className="lnk" href={`#/categories/pays/${encodeURIComponent(it.country)}`}>{it.country}</a></dd>
+          <dd><a className="lnk" href={`#/explorer?country=${encodeURIComponent(it.country)}`}>{it.country}</a></dd>
           <dt>Langues audio</dt>
           <dd>{it.langs.join(', ')}{it.audioDesc ? ' · Audiodescription' : ''}</dd>
           <dt>Sous-titres</dt>
@@ -696,7 +700,7 @@ export function Detail({ id }: { id: number }) {
           <dd>
             {it.genres.map((g, idx) => (
               <span key={g}>
-                <a className="lnk" href={`#/categories/genre/${encodeURIComponent(g)}`}>{g}</a>
+                <a className="lnk" href={`#/explorer?genre=${encodeURIComponent(g)}`}>{g}</a>
                 {idx < it.genres.length - 1 ? ', ' : ''}
               </span>
             ))}

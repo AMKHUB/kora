@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Provider, useApp } from './store'
 import { BrandLogo, Icon, MaintenancePage, ProfileAvatar, ToastHost } from './ui'
-import { Categories, Detail, Home, MyList, NotFound, Profile, Search, Settings, Subscription } from './pages'
+import { Detail, Home, MyList, NotFound, Profile, Search, Settings, Subscription } from './pages'
 import { Privacy, Terms } from './legal'
 import { Auth, AuthRequiredGate, EmailConfirmPage, ResetPasswordPage } from './auth'
 
@@ -21,23 +21,21 @@ function useRoute() {
 
 const TOP_LINKS: [string, string, string][] = [
   ['', 'Accueil', '#/'],
-  ['serie', 'Séries', '#/categories/type/serie'],
-  ['film', 'Films', '#/categories/type/film'],
-  ['doc', 'Documentaires', '#/categories/type/doc'],
-  ['categories', 'Explorer', '#/categories']
+  ['serie', 'Séries', '#/explorer?type=serie'],
+  ['film', 'Films', '#/explorer?type=film'],
+  ['doc', 'Documentaires', '#/explorer?type=doc'],
+  ['explorer', 'Explorer', '#/explorer']
 ]
 
 const MOBILE_PUBLIC: [string, string, string][] = [
   ['', 'Accueil', 'home'],
-  ['recherche', 'Recherche', 'search'],
-  ['categories', 'Explorer', 'grid'],
+  ['explorer', 'Explorer', 'search'],
   ['connexion', 'Connexion', 'user']
 ]
 
 const MOBILE_MEMBER: [string, string, string][] = [
   ['', 'Accueil', 'home'],
-  ['recherche', 'Recherche', 'search'],
-  ['categories', 'Explorer', 'grid'],
+  ['explorer', 'Explorer', 'search'],
   ['ma-liste', 'Ma liste', 'list'],
   ['profil', 'Profil', 'user']
 ]
@@ -66,14 +64,12 @@ function Consent() {
 }
 
 function TopNav() {
-  const { seg } = useRoute()
+  const { seg, q } = useRoute()
   const { session, profile, role, unreadCount, isPremium, st, setTheme } = useApp()
   const [scrolled, setScrolled] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
-  const [searchVal, setSearchVal] = useState('')
   const cur = seg[0] || ''
-  const subKind = seg[1] || ''
-  const subVal = seg[2] || ''
+  const isExploreRoute = cur === 'explorer' || cur === 'recherche' || cur === 'categories'
+  const activeType = q.get('type') || (cur === 'categories' && seg[1] === 'type' ? seg[2] || '' : '')
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24)
@@ -86,17 +82,10 @@ function TopNav() {
     setTheme(st.theme === 'dark' ? 'black' : st.theme === 'black' ? 'light' : 'dark')
   }
 
-  const submitQuickSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    const clean = searchVal.trim()
-    location.hash = clean ? `#/recherche?q=${encodeURIComponent(clean)}` : '#/recherche'
-    setSearchOpen(false)
-  }
-
   const isTopActive = (key: string) => {
     if (key === '') return cur === ''
-    if (key === 'categories') return cur === 'categories' && subKind !== 'type'
-    return cur === 'categories' && subKind === 'type' && subVal === key
+    if (key === 'explorer') return isExploreRoute && !activeType
+    return isExploreRoute && activeType === key
   }
 
   const mobileNav = session ? MOBILE_MEMBER : MOBILE_PUBLIC
@@ -133,25 +122,6 @@ function TopNav() {
         </div>
 
         <div className="topbar-right">
-          {searchOpen ? (
-            <form className="topbar-search" onSubmit={submitQuickSearch}>
-              <Icon n="search" s={17} />
-              <input
-                type="search"
-                autoFocus
-                value={searchVal}
-                onChange={e => setSearchVal(e.target.value)}
-                onBlur={() => { if (!searchVal.trim()) setSearchOpen(false) }}
-                placeholder="Titres, genres, pays…"
-                aria-label="Rechercher sur Kora"
-              />
-            </form>
-          ) : (
-            <button type="button" className="icon-btn" onClick={() => setSearchOpen(true)} aria-label="Rechercher">
-              <Icon n="search" s={19} />
-            </button>
-          )}
-
           {session && (
             <a className="topbar-pill" href="#/abonnement">
               <Icon n="crown" s={15} />
@@ -202,13 +172,16 @@ function TopNav() {
       </header>
 
       <nav className="mobile-dock" aria-label="Navigation mobile">
-        {mobileNav.map(([k, t, i]) => (
-          <a key={k} href={`#/${k}`} className={cur === k ? 'on' : ''} aria-current={cur === k ? 'page' : undefined}>
-            <Icon n={i} s={20} />
-            <span>{t}</span>
-            {session && k === 'profil' && unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
-          </a>
-        ))}
+        {mobileNav.map(([k, t, i]) => {
+          const active = k === 'explorer' ? isExploreRoute : cur === k
+          return (
+            <a key={k} href={`#/${k}`} className={active ? 'on' : ''} aria-current={active ? 'page' : undefined}>
+              <Icon n={i} s={20} />
+              <span>{t}</span>
+              {session && k === 'profil' && unreadCount > 0 && <span className="nav-dot" aria-label={`${unreadCount} notifications non lues`} />}
+            </a>
+          )
+        })}
       </nav>
     </>
   )
@@ -250,8 +223,18 @@ function Routes() {
 
   switch (a) {
     case undefined: return <Home />
-    case 'recherche': return <Search q0={q.get('q') || ''} />
-    case 'categories': return <Categories kind={b} val={c} />
+    case 'explorer':
+    case 'recherche':
+    case 'categories':
+      return (
+        <Search
+          q0={q.get('q') || ''}
+          type0={q.get('type') || (a === 'categories' && b === 'type' ? decodeURIComponent(c || '') : '')}
+          country0={q.get('country') || (a === 'categories' && b === 'pays' ? decodeURIComponent(c || '') : '')}
+          genre0={q.get('genre') || (a === 'categories' && b === 'genre' ? decodeURIComponent(c || '') : '')}
+          lang0={q.get('lang') || (a === 'categories' && b === 'langue' ? decodeURIComponent(c || '') : '')}
+        />
+      )
     case 'titre': return <Detail id={+b} />
     case 'connexion': return q.has('recovery') ? <ResetPasswordPage q={new URLSearchParams('step=new')} /> : <Auth q={q} />
     case 'confirmation': return <EmailConfirmPage q={q} />
