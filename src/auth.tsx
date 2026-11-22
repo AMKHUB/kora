@@ -439,7 +439,7 @@ export function AccountSummary() {
     <section className="panel account-cta">
       <div>
         <h2>Mon compte</h2>
-        <p className="mu">{u.email || u.phone} · <strong>{role === 'admin' ? 'Administrateur' : role === 'moderator' ? 'Modérateur' : 'Membre'}</strong></p>
+        <p className="mu">{u.email || u.phone}</p>
       </div>
       <div className="btns flush">
         {(role === 'admin' || role === 'moderator') && (
@@ -453,12 +453,9 @@ export function AccountSummary() {
 }
 
 export function AccountBox() {
-  const { session, role, signOut, st, updateAccount, toast } = useApp()
+  const { session, signOut, st, updateAccount } = useApp()
   const [name, setName] = useState(st.accountName || '')
   const [country, setCountry] = useState(st.accountCountry || 'Mali')
-  const [curPw, setCurPw] = useState('')
-  const [pw, setPw] = useState('')
-  const [msg, setMsg] = useState('')
 
   if (!session) return null
   const u = session.user
@@ -467,13 +464,10 @@ export function AccountBox() {
     <section className="panel">
       <div className="panel-head">
         <div>
-          <h2>Compte & Sécurité</h2>
-          <p className="mu">{u.email || u.phone} · Rôle : <strong>{role === 'admin' ? 'Administrateur' : role === 'moderator' ? 'Modérateur' : 'Membre'}</strong></p>
+          <h2>Mon compte</h2>
+          <p className="mu">{u.email || u.phone}</p>
         </div>
         <div className="btns flush">
-          {(role === 'admin' || role === 'moderator') && (
-            <a className="btn p" href="#/admin"><Icon n="shield" s={18} />{role === 'admin' ? 'Espace administrateur' : 'Modération'}</a>
-          )}
           <button type="button" className="btn" onClick={signOut}>Se déconnecter</button>
         </div>
       </div>
@@ -482,38 +476,13 @@ export function AccountBox() {
         <label>Nom du compte
           <input className="field" value={name} onChange={e => setName(e.target.value)} placeholder="Votre nom" />
         </label>
-        <label>Pays de résidence (droits catalogue)
+        <label>Pays de résidence
           <select value={country} onChange={e => setCountry(e.target.value)}>
             {COUNTRIES.map(c => <option key={c}>{c}</option>)}
           </select>
         </label>
-        <button type="button" className="btn" onClick={() => updateAccount(name, country)}>Enregistrer</button>
+        <button type="button" className="btn p" onClick={() => updateAccount(name, country)}>Enregistrer</button>
       </div>
-
-      {u.email && (
-        <div className="inline">
-          <label>Mot de passe actuel
-            <input className="field narrow" type="password" autoComplete="current-password" placeholder="Requis" value={curPw} onChange={e => setCurPw(e.target.value)} />
-          </label>
-          <label>Nouveau mot de passe
-            <input className="field narrow" type="password" minLength={8} autoComplete="new-password" placeholder="8 car. min." value={pw} onChange={e => setPw(e.target.value)} />
-          </label>
-          <button
-            type="button"
-            className="btn"
-            onClick={async () => {
-              if (!curPw) { setMsg('Saisissez votre mot de passe actuel pour confirmer.'); return }
-              if (pw.length < 8) { setMsg('Le nouveau mot de passe doit contenir au moins 8 caractères.'); return }
-              const r = await apiPost('/api/auth?action=update-password', { currentPassword: curPw, password: pw })
-              if (!r.ok) setMsg(r.data.error || 'Impossible de modifier le mot de passe.')
-              else { toast('Mot de passe mis à jour.', 'ok'); setMsg(''); setCurPw(''); setPw('') }
-            }}
-          >
-            Modifier le mot de passe
-          </button>
-        </div>
-      )}
-      {msg && <p role="status" className="mu">{msg}</p>}
     </section>
   )
 }

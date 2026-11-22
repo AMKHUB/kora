@@ -360,12 +360,33 @@ export function Search({
       <div className="page-head">
         <div>
           <h1>Explorer</h1>
-          <p className="mu">Recherchez une œuvre ou filtrez le catalogue par genre, pays, langue et format.</p>
+          <p className="mu">Recherchez une œuvre ou parcourez par films, séries, documentaires, genre et pays.</p>
         </div>
         <button type="button" className={'btn' + (showFilters || activeFilters ? ' active-btn' : '')} onClick={() => setShowFilters(s => !s)}>
           <Icon n="sliders" s={18} />
           Filtrer {activeFilters > 0 && `(${activeFilters})`}
         </button>
+      </div>
+
+      <div className="chips explorer-types" role="tablist" aria-label="Catégories principales">
+        {([
+          ['', 'Tout le catalogue'],
+          ['film', 'Films'],
+          ['serie', 'Séries'],
+          ['doc', 'Documentaires'],
+          ['court', 'Courts-métrages']
+        ] as const).map(([val, label]) => (
+          <button
+            key={val || 'all'}
+            type="button"
+            role="tab"
+            aria-selected={type === val}
+            className={'chip' + (type === val ? ' on' : '')}
+            onClick={() => setType(val)}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
       <form className="search-box" onSubmit={e => { e.preventDefault(); addRecentSearch(q) }}>
@@ -971,143 +992,509 @@ export function Profile() {
 }
 
 /* ============================================================================
-   PARAMÈTRES — Thème, Préférences de lecture, Compte, Notifications, Appareils
+   PARAMÈTRES (REFONTE INSPIRÉE DE CHROME SETTINGS)
+   Navigation latérale à onglets + Barre de recherche interne + Cartes en lignes
+   Sans mention de rôle ni modification de mot de passe
    ============================================================================ */
+type SettingsSectionId = 'account' | 'appearance' | 'playback' | 'privacy' | 'devices' | 'notifications'
+
+const SETTINGS_NAV: { id: SettingsSectionId; label: string; icon: string; keywords: string }[] = [
+  { id: 'account', label: 'Kora et vous', icon: 'user', keywords: 'compte profil nom pays abonnement foyer deconnexion' },
+  { id: 'appearance', label: 'Apparence', icon: 'sun', keywords: 'theme sombre clair oled couleur taille sous-titres' },
+  { id: 'playback', label: 'Lecture et langues', icon: 'film', keywords: 'qualite video 4k 1080p audio langue sous-titres episode suivant automatique' },
+  { id: 'privacy', label: 'Confidentialité et sécurité', icon: 'shield', keywords: 'confidentialite cookies publicite historique effacer donnees conditions' },
+  { id: 'devices', label: 'Appareils connectés', icon: 'device', keywords: 'appareils ecrans session navigateur deconnecter' },
+  { id: 'notifications', label: 'Notifications', icon: 'bell', keywords: 'notifications alertes messages nouveautes' }
+]
+
+const SETTINGS_COUNTRIES = [
+  'Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger', 'Bénin', 'Togo',
+  'Cameroun', 'Gabon', 'RD Congo', 'Nigeria', 'Ghana', 'Afrique du Sud', 'Maroc',
+  'France', 'Belgique', 'Suisse', 'Canada', 'États-Unis', 'Autre'
+]
+
 export function Settings() {
-  const { st, set, setTheme, revokeDevice, markNotificationsRead, unreadCount } = useApp()
+  const {
+    st, set, setTheme, session, profile, signOut, updateAccount,
+    clearHistory, revokeDevice, markNotificationsRead, unreadCount, toast
+  } = useApp()
+  const [sec, setSec] = useState<SettingsSectionId>('account')
+  const [searchQ, setSearchQ] = useState('')
+  const [accName, setAccName] = useState(st.accountName || '')
+  const [accCountry, setAccCountry] = useState(st.accountCountry || 'Mali')
+  const [consent, setConsentState] = useState(() => {
+    try { return localStorage.getItem('kora-consent') === 'yes' } catch { return false }
+  })
+
+  useEffect(() => {
+    setAccName(st.accountName || '')
+    setAccCountry(st.accountCountry || 'Mali')
+  }, [st.accountName, st.accountCountry])
+
   const activePlan = PLANS.find(p => p.id === st.plan) || PLANS[0]
-  const consent = (() => { try { return localStorage.getItem('kora-consent') === 'yes' } catch { return false } })()
+  const u = session?.user
+  const qClean = norm(searchQ.trim())
+
+  const showSec = (id: SettingsSectionId) => {
+    if (!qClean) return sec === id
+    const item = SETTINGS_NAV.find(n => n.id === id)
+    return Boolean(item && norm(`${item.label} ${item.keywords}`).includes(qClean))
+  }
+
+  const toggleConsent = () => {
+    const next = !consent
+    try { localStorage.setItem('kora-consent', next ? 'yes' : 'no') } catch { /* ignoré */ }
+    setConsentState(next)
+    toast(next ? 'Personnalisation publicitaire activée.' : 'Personnalisation publicitaire désactivée.', 'info')
+  }
+
+  const activeMeta = SETTINGS_NAV.find(n => n.id === sec) || SETTINGS_NAV[0]
 
   return (
-    <div className="page settings-page">
-      <div className="page-head">
-        <div>
+    <div className="cr-settings-shell">
+      {/* Barre supérieure façon Chrome Settings : Titre à gauche + Recherche centrée */}
+      <header className="cr-topbar">
+        <div className="cr-topbar-title">
+          <Icon n="gear" s={22} />
           <h1>Paramètres</h1>
-          <p className="mu">Apparence, préférences de lecture, notifications, appareils et sécurité du compte.</p>
         </div>
-        <a className="btn" href="#/profil"><Icon n="back" s={18} />Retour au profil</a>
-      </div>
+        <div className="cr-search-wrap">
+          <Icon n="search" s={18} />
+          <input
+            type="search"
+            value={searchQ}
+            onChange={e => setSearchQ(e.target.value)}
+            placeholder="Rechercher dans les paramètres"
+            aria-label="Rechercher dans les paramètres"
+          />
+          {searchQ && (
+            <button type="button" className="cr-clear-btn" onClick={() => setSearchQ('')} aria-label="Effacer">
+              ×
+            </button>
+          )}
+        </div>
+        <a className="btn cr-back-btn" href="#/profil">
+          <Icon n="user" s={17} />Profil
+        </a>
+      </header>
 
-      {/* Apparence & Thème Kora */}
-      <section className="panel">
-        <h2>Apparence & thème Kora</h2>
-        <p className="mu">Choisissez l’ambiance conforme à la charte Kora (mode sombre recommandé pour le cinéma).</p>
-        <div className="theme-grid" role="radiogroup" aria-label="Thème de l’interface">
-          {([
-            ['dark', 'Sombre Kora', 'Obsidienne chaude et touches dorées'],
-            ['black', 'Cinéma OLED', 'Noir profond idéal pour le visionnage nocturne'],
-            ['light', 'Clair éditorial', 'Fond clair chaleureux pour la lecture de jour']
-          ] as [ThemeMode, string, string][]).map(([id, label, desc]) => (
+      <div className="cr-layout">
+        {/* Menu latéral façon Chrome Settings */}
+        <aside className="cr-sidebar" aria-label="Rubriques des paramètres">
+          {SETTINGS_NAV.map(item => (
             <button
-              key={id}
+              key={item.id}
               type="button"
-              role="radio"
-              aria-checked={st.theme === id}
-              className={'theme-card' + (st.theme === id ? ' on' : '')}
-              onClick={() => setTheme(id)}
+              className={'cr-nav-item' + (!qClean && sec === item.id ? ' on' : '')}
+              onClick={() => { setSearchQ(''); setSec(item.id) }}
             >
-              <span className={'swatch swatch-' + id} aria-hidden="true" />
-              <div>
-                <strong>{label}</strong>
-                <small className="mu">{desc}</small>
-              </div>
+              <Icon n={item.icon} s={19} />
+              <span>{item.label}</span>
+              {item.id === 'notifications' && unreadCount > 0 && (
+                <span className="pill-accent" style={{ marginLeft: 'auto' }}>{unreadCount}</span>
+              )}
             </button>
           ))}
-        </div>
-      </section>
+        </aside>
 
-      {/* Préférences de lecture & accessibilité */}
-      <section className="panel">
-        <h2>Lecture & accessibilité</h2>
-        <div className="inline">
-          <label>Sous-titres par défaut
-            <select value={st.subLang} onChange={e => set({ subLang: e.target.value })}>
-              {['Désactivés', 'Français', 'English', 'Bambara'].map(x => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label>Langue audio préférée
-            <select value={st.audioLang} onChange={e => set({ audioLang: e.target.value })}>
-              {['Original', 'Bambara', 'Français', 'Wolof', 'Peul', 'Anglais'].map(x => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label>Taille des sous-titres
-            <select value={st.subSize} onChange={e => set({ subSize: e.target.value as any })}>
-              <option value="petit">Petit</option>
-              <option value="normal">Normal</option>
-              <option value="grand">Grand (haute lisibilité)</option>
-            </select>
-          </label>
-          <label>Qualité vidéo par défaut
-            <select value={st.defaultQuality} onChange={e => set({ defaultQuality: e.target.value })}>
-              {['Auto', '4K', '1080p', '720p', '480p'].map(x => <option key={x}>{x}</option>)}
-            </select>
-          </label>
-          <label className="chk">
-            <input type="checkbox" checked={st.autoNext !== false} onChange={e => set({ autoNext: e.target.checked })} />
-            Enchaîner l’épisode suivant automatiquement
-          </label>
-        </div>
-      </section>
+        {/* Colonne centrale façon Chrome Settings */}
+        <main className="cr-main">
+          {!qClean && (
+            <div className="cr-sec-header">
+              <h2>{activeMeta.label}</h2>
+              <p className="mu">
+                {sec === 'account' && 'Gérez les informations de votre compte Kora, vos profils du foyer et votre abonnement.'}
+                {sec === 'appearance' && 'Personnalisez le thème visuel et la taille d’affichage des sous-titres sur vos écrans.'}
+                {sec === 'playback' && 'Choisissez votre qualité vidéo, vos langues préférées et le comportement du lecteur.'}
+                {sec === 'privacy' && 'Contrôlez vos préférences de confidentialité, votre historique et vos données.'}
+                {sec === 'devices' && `Consultez les écrans connectés à votre compte (${st.devices.length}/${activePlan.screens} simultané${activePlan.screens > 1 ? 's' : ''}).`}
+                {sec === 'notifications' && 'Retrouvez les alertes et nouveautés liées à votre compte et au catalogue.'}
+              </p>
+            </div>
+          )}
 
-      {/* Compte & sécurité */}
-      <AccountBox />
-
-      {/* Notifications */}
-      <section className="panel">
-        <div className="panel-head">
-          <h2>Notifications {unreadCount > 0 && <span className="pill-accent">{unreadCount} nouvelle{unreadCount > 1 ? 's' : ''}</span>}</h2>
-          {unreadCount > 0 && <button type="button" className="lnk" onClick={() => markNotificationsRead()}>Tout marquer comme lu</button>}
-        </div>
-        {!st.notifications.length ? <p className="mu">Aucune notification.</p> : (
-          <ul className="notif-list">
-            {st.notifications.map(n => (
-              <li key={n.id} className={n.read ? 'read' : 'unread'}>
-                <div>
-                  <strong>{n.title}</strong>
-                  <p className="mu">{n.body}</p>
-                  <small className="mu">{fmtDate(n.date)}</small>
+          {/* 1. KORA ET VOUS (Compte sans mention de rôle ni mot de passe) */}
+          {showSec('account') && (
+            <section className="cr-section">
+              {qClean && <h3 className="cr-group-title">Kora et vous</h3>}
+              <div className="cr-card">
+                <div className="cr-row cr-profile-row">
+                  <div className="cr-row-left">
+                    <ProfileAvatar profile={profile} size={46} />
+                    <div className="cr-row-text">
+                      <strong>{accName || profile.name}</strong>
+                      <small className="mu">{u?.email || u?.phone || 'Compte connecté'}</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <button type="button" className="btn" onClick={signOut}>
+                      Se déconnecter
+                    </button>
+                  </div>
                 </div>
-                <div className="notif-acts">
-                  {n.link && (n.link.startsWith('#/') || n.link.startsWith('/')) && <a className="btn" href={n.link} onClick={() => markNotificationsRead(n.id)}>Voir</a>}
-                  {!n.read && <button type="button" className="lnk" onClick={() => markNotificationsRead(n.id)}>Lu</button>}
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
 
-      {/* Appareils connectés */}
-      <section className="panel">
-        <h2>Appareils connectés ({st.devices.length}/{activePlan.screens} écran{activePlan.screens > 1 ? 's' : ''} simultané{activePlan.screens > 1 ? 's' : ''})</h2>
-        <ul className="device-list">
-          {st.devices.map(d => (
-            <li key={d.id}>
-              <div className="device-info">
-                <Icon n="device" s={20} />
-                <div>
-                  <strong>{d.name} {d.current && <span className="pill-spec">Cet appareil</span>}</strong>
-                  <small className="mu">{d.platform} · Dernière activité : {fmtDate(d.lastSeen)}</small>
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="user" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Nom du titulaire</strong>
+                      <small className="mu">Nom affiché sur votre compte et vos factures</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <input
+                      className="field cr-inline-input"
+                      value={accName}
+                      onChange={e => setAccName(e.target.value)}
+                      placeholder="Votre nom"
+                      aria-label="Nom du titulaire"
+                    />
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="globe" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Pays de résidence</strong>
+                      <small className="mu">Détermine le catalogue et les moyens de paiement locaux</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <select
+                      className="cr-inline-select"
+                      value={accCountry}
+                      onChange={e => setAccCountry(e.target.value)}
+                      aria-label="Pays de résidence"
+                    >
+                      {SETTINGS_COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="check" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Sauvegarder vos informations</strong>
+                      <small className="mu">Appliquer les modifications de nom et de pays</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <button type="button" className="btn p" onClick={() => updateAccount(accName, accCountry)}>
+                      Enregistrer
+                    </button>
+                  </div>
                 </div>
               </div>
-              {!d.current && <button type="button" className="btn" onClick={() => revokeDevice(d.id)}>Déconnecter</button>}
-            </li>
-          ))}
-        </ul>
-      </section>
 
-      {/* Confidentialité & mentions */}
-      <section className="panel">
-        <h2>Confidentialité & données</h2>
-        <p className="mu">
-          Publicité personnalisée (formule gratuite) : <strong>{consent ? 'acceptée' : 'refusée'}</strong>.{' '}
-          <button type="button" className="lnk" onClick={() => { localStorage.removeItem('kora-consent'); location.reload() }}>Modifier mon choix</button>
-        </p>
-        <div className="btns">
-          <a className="btn" href="#/confidentialite">Politique de confidentialité</a>
-          <a className="btn" href="#/cgu">Conditions d’utilisation</a>
-        </div>
-      </section>
+              <h3 className="cr-group-title">Foyer et abonnement</h3>
+              <div className="cr-card">
+                <a className="cr-row cr-link-row" href="#/profil">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="user" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Profils du foyer ({st.profiles.length}/{activePlan.profiles})</strong>
+                      <small className="mu">Profil actif : {profile.name} · Gérer les avatars et le mode Enfant</small>
+                    </div>
+                  </div>
+                  <span className="cr-chev" aria-hidden="true"><Icon n="chevR" s={18} /></span>
+                </a>
+
+                <a className="cr-row cr-link-row" href="#/abonnement">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="crown" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Formule et paiements</strong>
+                      <small className="mu">Offre actuelle : Kora {activePlan.name} · Consulter les formules et factures</small>
+                    </div>
+                  </div>
+                  <span className="cr-chev" aria-hidden="true"><Icon n="chevR" s={18} /></span>
+                </a>
+              </div>
+            </section>
+          )}
+
+          {/* 2. APPARENCE */}
+          {showSec('appearance') && (
+            <section className="cr-section">
+              {qClean && <h3 className="cr-group-title">Apparence</h3>}
+              <div className="cr-card">
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n={st.theme === 'light' ? 'sun' : 'moon'} s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Thème de l’interface</strong>
+                      <small className="mu">Choisissez entre Sombre Kora, Cinéma OLED ou Clair éditorial</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <select
+                      className="cr-inline-select"
+                      value={st.theme}
+                      onChange={e => setTheme(e.target.value as ThemeMode)}
+                      aria-label="Thème de l’interface"
+                    >
+                      <option value="dark">Sombre Kora (Recommandé)</option>
+                      <option value="black">Cinéma OLED (Noir profond)</option>
+                      <option value="light">Clair éditorial</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="captions" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Taille des sous-titres</strong>
+                      <small className="mu">Adaptez la taille du texte affiché pendant la lecture vidéo</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <select
+                      className="cr-inline-select"
+                      value={st.subSize}
+                      onChange={e => set({ subSize: e.target.value as any })}
+                      aria-label="Taille des sous-titres"
+                    >
+                      <option value="petit">Petit</option>
+                      <option value="normal">Normal</option>
+                      <option value="grand">Grand (haute lisibilité)</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* 3. LECTURE ET LANGUES */}
+          {showSec('playback') && (
+            <section className="cr-section">
+              {qClean && <h3 className="cr-group-title">Lecture et langues</h3>}
+              <div className="cr-card">
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="film" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Qualité vidéo par défaut</strong>
+                      <small className="mu">Ajuste la résolution selon votre connexion Internet</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <select
+                      className="cr-inline-select"
+                      value={st.defaultQuality}
+                      onChange={e => set({ defaultQuality: e.target.value })}
+                      aria-label="Qualité vidéo par défaut"
+                    >
+                      {['Auto', '4K', '1080p', '720p', '480p'].map(x => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="vol" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Langue audio préférée</strong>
+                      <small className="mu">Piste audio sélectionnée à l’ouverture d’une œuvre</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <select
+                      className="cr-inline-select"
+                      value={st.audioLang}
+                      onChange={e => set({ audioLang: e.target.value })}
+                      aria-label="Langue audio préférée"
+                    >
+                      {['Original', 'Bambara', 'Français', 'Wolof', 'Peul', 'Anglais'].map(x => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="captions" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Sous-titres par défaut</strong>
+                      <small className="mu">Langue des sous-titres synchronisés activée au lancement</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <select
+                      className="cr-inline-select"
+                      value={st.subLang}
+                      onChange={e => set({ subLang: e.target.value })}
+                      aria-label="Sous-titres par défaut"
+                    >
+                      {['Désactivés', 'Français', 'English', 'Bambara'].map(x => <option key={x} value={x}>{x}</option>)}
+                    </select>
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="play" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Lecture automatique de l’épisode suivant</strong>
+                      <small className="mu">Enchaîne automatiquement les épisodes d’une série</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={st.autoNext !== false}
+                      className={'cr-switch' + (st.autoNext !== false ? ' on' : '')}
+                      onClick={() => set({ autoNext: st.autoNext === false })}
+                      aria-label="Lecture automatique de l’épisode suivant"
+                    >
+                      <span />
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* 4. CONFIDENTIALITÉ ET SÉCURITÉ */}
+          {showSec('privacy') && (
+            <section className="cr-section">
+              {qClean && <h3 className="cr-group-title">Confidentialité et sécurité</h3>}
+              <div className="cr-card">
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="shield" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Publicités personnalisées (formule gratuite)</strong>
+                      <small className="mu">Adapter les annonces de la formule gratuite selon vos centres d’intérêt</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={consent}
+                      className={'cr-switch' + (consent ? ' on' : '')}
+                      onClick={toggleConsent}
+                      aria-label="Publicités personnalisées"
+                    >
+                      <span />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="cr-row">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="trash" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Effacer l’historique de visionnage</strong>
+                      <small className="mu">Supprimer les reprises de lecture du profil {profile.name}</small>
+                    </div>
+                  </div>
+                  <div className="cr-row-ctrl">
+                    <button type="button" className="btn" onClick={() => { clearHistory(); toast('Historique de visionnage effacé.', 'info') }}>
+                      Effacer
+                    </button>
+                  </div>
+                </div>
+
+                <a className="cr-row cr-link-row" href="#/confidentialite">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="info" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Politique de confidentialité</strong>
+                      <small className="mu">Protection de vos données personnelles et de vos profils</small>
+                    </div>
+                  </div>
+                  <span className="cr-chev" aria-hidden="true"><Icon n="chevR" s={18} /></span>
+                </a>
+
+                <a className="cr-row cr-link-row" href="#/cgu">
+                  <div className="cr-row-left">
+                    <span className="cr-row-icon"><Icon n="info" s={18} /></span>
+                    <div className="cr-row-text">
+                      <strong>Conditions générales d’utilisation</strong>
+                      <small className="mu">Règles d’accès au catalogue et aux abonnements Kora</small>
+                    </div>
+                  </div>
+                  <span className="cr-chev" aria-hidden="true"><Icon n="chevR" s={18} /></span>
+                </a>
+              </div>
+            </section>
+          )}
+
+          {/* 5. APPAREILS CONNECTÉS */}
+          {showSec('devices') && (
+            <section className="cr-section">
+              {qClean && <h3 className="cr-group-title">Appareils connectés</h3>}
+              <div className="cr-card">
+                {st.devices.map(d => (
+                  <div key={d.id} className="cr-row">
+                    <div className="cr-row-left">
+                      <span className="cr-row-icon"><Icon n="device" s={18} /></span>
+                      <div className="cr-row-text">
+                        <strong>{d.name} {d.current && <span className="pill-spec">Cet appareil</span>}</strong>
+                        <small className="mu">{d.platform} · Dernière activité : {fmtDate(d.lastSeen)}</small>
+                      </div>
+                    </div>
+                    <div className="cr-row-ctrl">
+                      {!d.current && (
+                        <button type="button" className="btn" onClick={() => revokeDevice(d.id)}>
+                          Déconnecter
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {/* 6. NOTIFICATIONS */}
+          {showSec('notifications') && (
+            <section className="cr-section">
+              <div className="cr-group-head">
+                {qClean ? <h3 className="cr-group-title">Notifications</h3> : <span />}
+                {unreadCount > 0 && (
+                  <button type="button" className="lnk small-lnk" onClick={() => markNotificationsRead()}>
+                    Tout marquer comme lu
+                  </button>
+                )}
+              </div>
+              <div className="cr-card">
+                {!st.notifications.length ? (
+                  <div className="cr-row">
+                    <span className="mu">Aucune notification pour le moment.</span>
+                  </div>
+                ) : (
+                  st.notifications.map(n => (
+                    <div key={n.id} className={'cr-row' + (n.read ? '' : ' cr-unread')}>
+                      <div className="cr-row-left">
+                        <span className="cr-row-icon"><Icon n="bell" s={18} /></span>
+                        <div className="cr-row-text">
+                          <strong>{n.title}</strong>
+                          <small className="mu">{n.body} · {fmtDate(n.date)}</small>
+                        </div>
+                      </div>
+                      <div className="cr-row-ctrl">
+                        {n.link && (n.link.startsWith('#/') || n.link.startsWith('/')) && (
+                          <a className="btn" href={n.link} onClick={() => markNotificationsRead(n.id)}>Voir</a>
+                        )}
+                        {!n.read && (
+                          <button type="button" className="lnk small-lnk" onClick={() => markNotificationsRead(n.id)}>
+                            Lu
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          )}
+        </main>
+      </div>
 
       <Footer />
     </div>

@@ -199,9 +199,8 @@ small { font-size: 0.81rem; }
 
 .chips {
   display: flex; flex-wrap: nowrap; align-items: center; gap: 8px;
-  overflow-x: auto; scrollbar-width: none; padding: 2px 0 6px;
+  overflow-x: auto; scrollbar-width: thin; padding: 2px 0 8px;
 }
-.chips::-webkit-scrollbar { display: none; }
 .chip {
   flex: 0 0 auto;
   display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
@@ -544,4 +543,26 @@ th { color: var(--st-muted); font-size: 0.74rem; text-transform: uppercase; lett
   .tt-main { padding: 28px 34px 64px; }
   .wizard-grid { grid-template-columns: 1.55fr 0.85fr; }
   .tt-phone-preview { position: sticky; top: 86px; }
+}
+
+
+/* Bandes déroulantes stylisées dans Kora Studio */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(242, 195, 52, 0.42) rgba(255, 255, 255, 0.05);
+}
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(90deg, rgba(242, 195, 52, 0.45), rgba(242, 195, 52, 0.75));
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--st-gold);
 }

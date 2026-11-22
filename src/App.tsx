@@ -21,9 +21,6 @@ function useRoute() {
 
 const TOP_LINKS: [string, string, string][] = [
   ['', 'Accueil', '#/'],
-  ['serie', 'Séries', '#/explorer?type=serie'],
-  ['film', 'Films', '#/explorer?type=film'],
-  ['doc', 'Documentaires', '#/explorer?type=doc'],
   ['explorer', 'Explorer', '#/explorer']
 ]
 
@@ -84,8 +81,8 @@ function TopNav() {
 
   const isTopActive = (key: string) => {
     if (key === '') return cur === ''
-    if (key === 'explorer') return isExploreRoute && !activeType
-    return isExploreRoute && activeType === key
+    if (key === 'explorer') return isExploreRoute
+    return false
   }
 
   const mobileNav = session ? MOBILE_MEMBER : MOBILE_PUBLIC
