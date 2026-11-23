@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useRef, useState } from 'react'
+import { Children, CSSProperties, isValidElement, ReactNode, useEffect, useRef, useState } from 'react'
 import { AVATARS, Item, Profile, useApp } from './store'
 
 // Pictogrammes alignés sur brand/pictogrammes/ (Lucide, stroke-width 1.75, round caps)
@@ -527,6 +527,156 @@ export function MaintenancePage({
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+
+// Liste déroulante personnalisée Kora (remplace la boîte grise native du système sur mobile et ordinateur)
+type SelectOptionItem = { value: string; label: string }
+
+function extractSelectOptions(children: ReactNode): SelectOptionItem[] {
+  const out: SelectOptionItem[] = []
+  const walk = (nodes: ReactNode) => {
+    Children.forEach(nodes, child => {
+      if (!isValidElement(child)) return
+      if (child.type === 'option') {
+        const rawChildren = child.props.children
+        const label = Array.isArray(rawChildren)
+          ? rawChildren.map(x => (x == null ? '' : String(x))).join('')
+          : rawChildren == null
+            ? ''
+            : String(rawChildren)
+        const val = child.props.value !== undefined ? String(child.props.value) : label
+        out.push({ value: val, label })
+      } else if (child.props?.children) {
+        walk(child.props.children)
+      }
+    })
+  }
+  walk(children)
+  return out
+}
+
+export function Select({
+  value,
+  onChange,
+  children,
+  className = '',
+  style,
+  disabled = false,
+  'aria-label': ariaLabel
+}: {
+  value?: string | number
+  onChange?: (e: { target: { value: string }; currentTarget: { value: string } }) => void
+  children?: ReactNode
+  className?: string
+  style?: CSSProperties
+  disabled?: boolean
+  'aria-label'?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const opts = extractSelectOptions(children)
+  const strVal = String(value ?? '')
+  const activeOpt = opts.find(o => o.value === strVal) || opts[0]
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (ev: MouseEvent | TouchEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(ev.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('touchstart', onDown, { passive: true })
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('touchstart', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  return (
+    <div
+      ref={wrapRef}
+      className={'kselect' + (open ? ' open' : '') + (className ? ' ' + className : '')}
+      style={style}
+    >
+      <button
+        type="button"
+        className="kselect-trigger"
+        disabled={disabled}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={ariaLabel}
+        onClick={e => {
+          e.preventDefault()
+          e.stopPropagation()
+          if (!disabled) setOpen(o => !o)
+        }}
+      >
+        <span className="kselect-label">{activeOpt ? activeOpt.label : strVal}</span>
+        <svg
+          className="kselect-arrow"
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {open && (
+        <>
+          <div
+            className="kselect-backdrop"
+            onClick={e => {
+              e.preventDefault()
+              e.stopPropagation()
+              setOpen(false)
+            }}
+          />
+          <div className="kselect-menu" role="listbox" aria-label={ariaLabel}>
+            {opts.map(opt => {
+              const on = opt.value === strVal
+              return (
+                <button
+                  key={opt.value}
+                  type="button"
+                  role="option"
+                  aria-selected={on}
+                  className={'kselect-opt' + (on ? ' on' : '')}
+                  onClick={e => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    onChange?.({
+                      target: { value: opt.value },
+                      currentTarget: { value: opt.value }
+                    })
+                    setOpen(false)
+                  }}
+                >
+                  <span className="kselect-opt-text">{opt.label}</span>
+                  <span className={'kselect-radio' + (on ? ' on' : '')} aria-hidden="true">
+                    <span />
+                  </span>
+                </button>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }

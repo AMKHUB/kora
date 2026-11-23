@@ -566,3 +566,313 @@ th { color: var(--st-muted); font-size: 0.74rem; text-transform: uppercase; lett
 ::-webkit-scrollbar-thumb:hover {
   background: var(--st-gold);
 }
+
+
+/* ============================================================================
+   MENU DÉROULANT PERSONNALISÉ (.kselect) & RESPONSIVE MOBILE KORA STUDIO
+   ============================================================================ */
+.kselect {
+  position: relative;
+  width: 100%;
+  min-width: 140px;
+}
+
+.kselect-trigger {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--st-surface-2) 0%, var(--st-bg) 100%);
+  border: 1.5px solid var(--st-border-strong);
+  color: var(--st-text);
+  font-weight: 600;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  transition: border-color 180ms var(--st-ease), box-shadow 180ms var(--st-ease), background 180ms var(--st-ease);
+}
+
+.kselect-trigger:hover:not(:disabled) {
+  border-color: rgba(242, 195, 52, 0.55);
+  background: var(--st-surface-2);
+}
+
+.kselect.open .kselect-trigger {
+  border-color: var(--st-gold);
+  box-shadow: 0 0 0 3px rgba(242, 195, 52, 0.22);
+}
+
+.kselect-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.kselect-arrow {
+  color: var(--st-gold);
+  flex-shrink: 0;
+  transition: transform 200ms var(--st-ease);
+}
+.kselect.open .kselect-arrow {
+  transform: rotate(180deg);
+}
+
+.kselect-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(6, 6, 9, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.kselect-menu {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 95;
+  max-height: 66vh;
+  overflow-y: auto;
+  border-radius: 18px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, rgba(254, 44, 85, 0.14), transparent 65%),
+    linear-gradient(165deg, var(--st-surface-2) 0%, var(--st-surface) 100%);
+  border: 1.5px solid var(--st-gold);
+  box-shadow: 0 28px 64px rgba(0, 0, 0, 0.82);
+  padding: 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.kselect-opt {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 16px;
+  border-radius: 12px;
+  text-align: left;
+  font-size: 0.94rem;
+  font-weight: 500;
+  color: var(--st-text);
+  background: transparent;
+  border: 1px solid transparent;
+  transition: background 150ms var(--st-ease), border-color 150ms var(--st-ease);
+}
+.kselect-opt:hover {
+  background: rgba(242, 195, 52, 0.1);
+}
+.kselect-opt.on {
+  background: rgba(242, 195, 52, 0.16);
+  border-color: rgba(242, 195, 52, 0.45);
+  color: var(--st-gold);
+  font-weight: 700;
+}
+
+.kselect-radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--st-border-strong);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+.kselect-radio > span {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: transparent;
+  transform: scale(0);
+  transition: transform 150ms var(--st-ease);
+}
+.kselect-radio.on {
+  border-color: var(--st-gold);
+}
+.kselect-radio.on > span {
+  background: var(--st-gold);
+  transform: scale(1);
+}
+
+/* Barre de navigation mobile en bas de Kora Studio (façon application TikTok Studio) */
+.tt-bottom-dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 48;
+  height: calc(64px + env(safe-area-inset-bottom));
+  padding: 0 8px env(safe-area-inset-bottom);
+  background: rgba(16, 16, 21, 0.94);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border-top: 1px solid var(--st-border-strong);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+}
+
+.tt-bottom-dock > button {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 4px;
+  font-size: 0.71rem;
+  font-weight: 600;
+  color: var(--st-muted);
+}
+
+.tt-bottom-dock > button.on {
+  color: var(--st-text);
+}
+
+.tt-bottom-dock > button.tt-dock-plus {
+  flex: 0 0 48px;
+  height: 36px;
+  border-radius: 11px;
+  background: linear-gradient(135deg, var(--st-accent) 0%, #E01E48 100%);
+  color: #FFFFFF;
+  box-shadow: 0 6px 18px rgba(254, 44, 85, 0.38);
+}
+
+/* Responsive Mobile & Tablette Kora Studio */
+@media (max-width: 719px) {
+  .tt-shell {
+    padding-bottom: calc(68px + env(safe-area-inset-bottom));
+  }
+  .tt-topbar {
+    height: 58px;
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .tt-brand-name {
+    font-size: 1.04rem;
+  }
+  .tt-brand-pill,
+  .tt-btn-text {
+    display: none;
+  }
+  .tt-top-right {
+    gap: 6px;
+  }
+  .tt-top-right .btn {
+    min-height: 36px;
+    padding: 6px 11px;
+    font-size: 0.82rem;
+  }
+  .tt-main {
+    padding: 16px 12px 44px;
+  }
+  .panel {
+    padding: 16px 14px;
+  }
+  .page-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+  .page-head .btn {
+    width: 100%;
+  }
+  .tt-kpi-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .tt-kpi {
+    padding: 14px;
+  }
+  .tt-kpi-val {
+    font-size: 1.5rem;
+  }
+  .stepper {
+    display: flex;
+    overflow-x: auto;
+    gap: 8px;
+    padding-bottom: 6px;
+  }
+  .step-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    padding: 9px 12px;
+    font-size: 0.82rem;
+  }
+  .inline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .inline label,
+  .field.narrow {
+    width: 100%;
+    max-width: none;
+    min-width: 0;
+  }
+  .studio-row-card {
+    padding: 12px;
+    gap: 12px;
+  }
+  .studio-row-card .btns {
+    width: 100%;
+    justify-content: stretch;
+    border-top: 1px solid var(--st-border);
+    padding-top: 10px;
+  }
+  .studio-row-card .btns .btn {
+    flex: 1;
+  }
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px 10px;
+  }
+  .tt-phone-frame {
+    max-width: 210px;
+  }
+  .toast-host {
+    left: 12px;
+    right: 12px;
+    bottom: calc(74px + env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 680px) {
+  .kselect-backdrop {
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+  .kselect-menu {
+    position: absolute;
+    left: 0;
+    right: auto;
+    top: calc(100% + 6px);
+    transform: none;
+    min-width: 100%;
+    width: max-content;
+    max-width: 320px;
+    max-height: 300px;
+    border-radius: 14px;
+    padding: 6px;
+  }
+  .kselect-opt {
+    padding: 10px 13px;
+    font-size: 0.88rem;
+    border-radius: 9px;
+  }
+}
+
+@media (min-width: 960px) {
+  .tt-bottom-dock {
+    display: none;
+  }
+}

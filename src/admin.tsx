@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiGet, apiPost, uploadFileToSignedUrl } from './api'
 import { useApp } from './store'
-import { Icon } from './ui'
+import { Icon, Select } from './ui'
 
 const num = (n: unknown) => Number(n || 0).toLocaleString('fr-FR')
 const STATUS: Record<string, string> = { draft: 'Brouillon', published: 'Publié', unpublished: 'Dépublié' }
@@ -424,19 +424,19 @@ function RightsManager() {
       <p className="mu">Définissez les territoires autorisés et le niveau d’accès requis pour chaque œuvre.</p>
       <form className="inline" onSubmit={add}>
         <label>Titre
-          <select value={titleId} onChange={e => setTitleId(e.target.value)}>
+          <Select value={titleId} onChange={e => setTitleId(e.target.value)}>
             {titles.map(t => <option key={t.id} value={t.id}>{t.title}</option>)}
-          </select>
+          </Select>
         </label>
         <label>Pays
-          <select value={country} onChange={e => setCountry(e.target.value)}>
+          <Select value={country} onChange={e => setCountry(e.target.value)}>
             {COUNTRIES.map(c => <option key={c}>{c}</option>)}
-          </select>
+          </Select>
         </label>
         <label>Accès
-          <select value={access} onChange={e => setAccess(e.target.value)}>
+          <Select value={access} onChange={e => setAccess(e.target.value)}>
             {ACCESS_KINDS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
-          </select>
+          </Select>
         </label>
         <label>Du
           <input className="field narrow" type="date" value={from} onChange={e => setFrom(e.target.value)} />
@@ -499,11 +499,11 @@ function UsersManager() {
           u.email || u.phone || '—',
           u.country || '—',
           u.plan_id || 'free',
-          <select value={u.role} onChange={e => changeRole(u.id, e.target.value)} aria-label={`Rôle de ${u.name || u.email}`}>
+          <Select value={u.role} onChange={e => changeRole(u.id, e.target.value)} aria-label={`Rôle de ${u.name || u.email}`}>
             <option value="user">Utilisateur</option>
             <option value="moderator">Modérateur</option>
             <option value="admin">Administrateur</option>
-          </select>,
+          </Select>,
           u.created_at ? new Date(u.created_at).toLocaleDateString('fr-FR') : '—'
         ])}
         empty="Aucun compte trouvé."
@@ -553,13 +553,13 @@ function List() {
           <p className="mu">Modifiez les fiches éditoriales, badges et visibilité. La mise en ligne des vidéos se fait dans l’application Kora Studio.</p>
         </div>
         <div className="inline" style={{ margin: 0 }}>
-          <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filtrer par type">
+          <Select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} aria-label="Filtrer par type">
             <option value="all">Tous les types</option>
             <option value="series">Séries</option>
             <option value="film">Films</option>
             <option value="doc">Documentaires</option>
             <option value="short">Courts-métrages</option>
-          </select>
+          </Select>
           <input className="field narrow" type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Filtrer un titre…" aria-label="Filtrer les contenus" />
         </div>
       </div>
@@ -717,11 +717,11 @@ function MetadataEditor({ id }: { id: string }) {
 
       <label>Titre<input className="field" value={f.title} onChange={e => up('title', e.target.value)} /></label>
       <div className="inline">
-        <label>Type<select value={f.type} onChange={e => up('type', e.target.value)}>{TYPES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+        <label>Type<Select value={f.type} onChange={e => up('type', e.target.value)}>{TYPES.map(([k, t]) => <option key={k} value={k}>{t}</option>)}</Select></label>
         <label>Année<input className="field narrow" inputMode="numeric" value={f.year} onChange={e => up('year', e.target.value)} /></label>
         <label>Durée moy. (min)<input className="field narrow" inputMode="numeric" value={f.duration_min} onChange={e => up('duration_min', e.target.value)} /></label>
-        <label>Âge<select value={f.age_rating} onChange={e => up('age_rating', e.target.value)}>{AGES.map(a => <option key={a}>{a}</option>)}</select></label>
-        <label>Statut<select value={f.status} onChange={e => up('status', e.target.value)}>{Object.entries(STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</select></label>
+        <label>Âge<Select value={f.age_rating} onChange={e => up('age_rating', e.target.value)}>{AGES.map(a => <option key={a}>{a}</option>)}</Select></label>
+        <label>Statut<Select value={f.status} onChange={e => up('status', e.target.value)}>{Object.entries(STATUS).map(([k, t]) => <option key={k} value={k}>{t}</option>)}</Select></label>
       </div>
 
       <div className="cover-upload-grid">
@@ -748,7 +748,7 @@ function MetadataEditor({ id }: { id: string }) {
 
       <div className="inline">
         <label>Pays<input className="field" value={f.country} onChange={e => up('country', e.target.value)} /></label>
-        <label>Langue originale<select value={f.original_language} onChange={e => up('original_language', e.target.value)}>{langs.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</select></label>
+        <label>Langue originale<Select value={f.original_language} onChange={e => up('original_language', e.target.value)}>{langs.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}</Select></label>
       </div>
       <label>Réalisation (noms séparés par des virgules)<input className="field" value={dir} onChange={e => setDir(e.target.value)} /></label>
       <label>Distribution (noms séparés par des virgules)<input className="field" value={cast} onChange={e => setCast(e.target.value)} /></label>
@@ -1056,19 +1056,19 @@ function AdsManager() {
               <input className="field" required value={f.advertiser} onChange={e => setF(x => ({ ...x, advertiser: e.target.value }))} placeholder="Ex. Orange Mali, Moov, Banque…" />
             </label>
             <label>Emplacement
-              <select value={f.placement} onChange={e => setF(x => ({ ...x, placement: e.target.value }))}>
+              <Select value={f.placement} onChange={e => setF(x => ({ ...x, placement: e.target.value }))}>
                 <option value="preroll">Avant la vidéo (Pre-roll)</option>
                 <option value="midroll">Pause milieu de film (Mid-roll)</option>
-              </select>
+              </Select>
             </label>
           </div>
 
           <div className="inline">
             <label>Format du spot
-              <select value={f.media_type} onChange={e => setF(x => ({ ...x, media_type: e.target.value }))}>
+              <Select value={f.media_type} onChange={e => setF(x => ({ ...x, media_type: e.target.value }))}>
                 <option value="video">Spot vidéo (MP4 / WebM / MOV)</option>
                 <option value="image">Visuel fixe (JPG / PNG / WebP)</option>
-              </select>
+              </Select>
             </label>
             <label>Importer un fichier spot
               <input

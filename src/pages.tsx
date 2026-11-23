@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AVATARS, Episode, Item, PLANS, PlanId, Profile as ProfileType, ThemeMode, useApp } from './store'
-import { BrandLogo, Card, Icon, Meta, Modal, PinModal, Poster, ProfileAvatar, Row } from './ui'
+import { BrandLogo, Card, Icon, Meta, Modal, PinModal, Poster, ProfileAvatar, Row, Select } from './ui'
 import { AccountBox, AccountSummary } from './auth'
 import {
   confirmSaspayPaymentOtp,
@@ -420,68 +420,68 @@ export function Search({
           <div className="filter-grid">
             <label className={'filter-item tone-gold' + (type ? ' has-val' : '')}>
               <span>Format</span>
-              <select value={type} onChange={e => setType(e.target.value)}>
+              <Select value={type} onChange={e => setType(e.target.value)}>
                 <option value="">Tous les formats</option>
                 <option value="film">Films</option>
                 <option value="serie">Séries</option>
                 <option value="doc">Documentaires</option>
                 <option value="court">Courts-métrages</option>
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-emerald' + (country ? ' has-val' : '')}>
               <span>Pays & origine</span>
-              <select value={country} onChange={e => setCountry(e.target.value)}>
+              <Select value={country} onChange={e => setCountry(e.target.value)}>
                 <option value="">Tous les pays</option>
                 {countries.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-rose' + (genre ? ' has-val' : '')}>
               <span>Genre</span>
-              <select value={genre} onChange={e => setGenre(e.target.value)}>
+              <Select value={genre} onChange={e => setGenre(e.target.value)}>
                 <option value="">Tous les genres</option>
                 {genres.map(g => <option key={g} value={g}>{g}</option>)}
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-amber' + (lang ? ' has-val' : '')}>
               <span>Langue audio</span>
-              <select value={lang} onChange={e => setLang(e.target.value)}>
+              <Select value={lang} onChange={e => setLang(e.target.value)}>
                 <option value="">Toutes les langues</option>
                 {langs.map(l => <option key={l} value={l}>{l}</option>)}
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-cyan' + (age ? ' has-val' : '')}>
               <span>Public / Âge</span>
-              <select value={age} onChange={e => setAge(e.target.value)}>
+              <Select value={age} onChange={e => setAge(e.target.value)}>
                 <option value="">Tous publics</option>
                 {['Tous', '7+', '12+', '16+'].map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-violet' + (dur ? ' has-val' : '')}>
               <span>Durée</span>
-              <select value={dur} onChange={e => setDur(e.target.value)}>
+              <Select value={dur} onChange={e => setDur(e.target.value)}>
                 <option value="">Toutes durées</option>
                 <option value="short">Moins de 30 min</option>
                 <option value="mid">30 à 90 min</option>
                 <option value="long">Plus de 90 min</option>
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-copper' + (era ? ' has-val' : '')}>
               <span>Période</span>
-              <select value={era} onChange={e => setEra(e.target.value)}>
+              <Select value={era} onChange={e => setEra(e.target.value)}>
                 <option value="">Toutes époques</option>
                 <option value="2020s">Années 2020</option>
                 <option value="classic">Classiques (&lt; 2000)</option>
-              </select>
+              </Select>
             </label>
             <label className={'filter-item tone-indigo' + (sort !== 'relevance' ? ' has-val' : '')}>
               <span>Trier par</span>
-              <select value={sort} onChange={e => setSort(e.target.value)}>
+              <Select value={sort} onChange={e => setSort(e.target.value)}>
                 <option value="relevance">Pertinence</option>
                 <option value="newest">Plus récents</option>
                 <option value="oldest">Plus anciens</option>
                 <option value="duration">Durée</option>
                 <option value="alpha">Ordre A–Z</option>
-              </select>
+              </Select>
             </label>
           </div>
         </section>
@@ -770,13 +770,13 @@ export function Detail({ id }: { id: number }) {
       <Modal open={reportOpen} onClose={() => setReportOpen(false)} title={`Signaler « ${it.title} »`}>
         <form className="form" onSubmit={sendReport}>
           <label>Motif du signalement
-            <select value={reason} onChange={e => setReason(e.target.value)}>
+            <Select value={reason} onChange={e => setReason(e.target.value)}>
               <option>Problème de lecture vidéo ou audio</option>
               <option>Sous-titres décalés ou manquants</option>
               <option>Erreur dans les informations ou la fiche</option>
               <option>Classification d’âge inadaptée</option>
               <option>Problème de droits ou contenu inapproprié</option>
-            </select>
+            </Select>
           </label>
           <label>Précisions (facultatif)
             <textarea className="field" rows={3} value={details} onChange={e => setDetails(e.target.value)} placeholder="Décrivez brièvement le souci rencontré…" />
@@ -921,9 +921,9 @@ export function Profile() {
             <input className="field" required value={newName} onChange={e => setNewName(e.target.value)} placeholder="Ex. Fatoumata" />
           </label>
           <label>Couleur d’avatar
-            <select value={newAvatar} onChange={e => setNewAvatar(e.target.value)}>
+            <Select value={newAvatar} onChange={e => setNewAvatar(e.target.value)}>
               {AVATARS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-            </select>
+            </Select>
           </label>
           <label>Code PIN (facultatif)
             <input className="field narrow" inputMode="numeric" maxLength={4} value={newPin} onChange={e => setNewPin(e.target.value.replace(/\D/g, ''))} placeholder="4 chiffres" />
@@ -958,9 +958,9 @@ export function Profile() {
               <input className="field" value={editName} onChange={e => setEditName(e.target.value)} required />
             </label>
             <label>Avatar
-              <select value={editAvatar} onChange={e => setEditAvatar(e.target.value)}>
+              <Select value={editAvatar} onChange={e => setEditAvatar(e.target.value)}>
                 {AVATARS.map(a => <option key={a.id} value={a.id}>{a.label}</option>)}
-              </select>
+              </Select>
             </label>
             <label className="chk">
               <input type="checkbox" checked={editKid} onChange={e => setEditKid(e.target.checked)} />
@@ -1161,14 +1161,14 @@ export function Settings() {
                     </div>
                   </div>
                   <div className="cr-row-ctrl">
-                    <select
+                    <Select
                       className="cr-inline-select"
                       value={accCountry}
                       onChange={e => setAccCountry(e.target.value)}
                       aria-label="Pays de résidence"
                     >
                       {SETTINGS_COUNTRIES.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -1229,7 +1229,7 @@ export function Settings() {
                     </div>
                   </div>
                   <div className="cr-row-ctrl">
-                    <select
+                    <Select
                       className="cr-inline-select"
                       value={st.theme}
                       onChange={e => setTheme(e.target.value as ThemeMode)}
@@ -1238,7 +1238,7 @@ export function Settings() {
                       <option value="dark">Sombre Kora (Recommandé)</option>
                       <option value="black">Cinéma OLED (Noir profond)</option>
                       <option value="light">Clair éditorial</option>
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -1251,7 +1251,7 @@ export function Settings() {
                     </div>
                   </div>
                   <div className="cr-row-ctrl">
-                    <select
+                    <Select
                       className="cr-inline-select"
                       value={st.subSize}
                       onChange={e => set({ subSize: e.target.value as any })}
@@ -1260,7 +1260,7 @@ export function Settings() {
                       <option value="petit">Petit</option>
                       <option value="normal">Normal</option>
                       <option value="grand">Grand (haute lisibilité)</option>
-                    </select>
+                    </Select>
                   </div>
                 </div>
               </div>
@@ -1281,14 +1281,14 @@ export function Settings() {
                     </div>
                   </div>
                   <div className="cr-row-ctrl">
-                    <select
+                    <Select
                       className="cr-inline-select"
                       value={st.defaultQuality}
                       onChange={e => set({ defaultQuality: e.target.value })}
                       aria-label="Qualité vidéo par défaut"
                     >
                       {['Auto', '4K', '1080p', '720p', '480p'].map(x => <option key={x} value={x}>{x}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -1301,14 +1301,14 @@ export function Settings() {
                     </div>
                   </div>
                   <div className="cr-row-ctrl">
-                    <select
+                    <Select
                       className="cr-inline-select"
                       value={st.audioLang}
                       onChange={e => set({ audioLang: e.target.value })}
                       aria-label="Langue audio préférée"
                     >
                       {['Original', 'Bambara', 'Français', 'Wolof', 'Peul', 'Anglais'].map(x => <option key={x} value={x}>{x}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -1321,14 +1321,14 @@ export function Settings() {
                     </div>
                   </div>
                   <div className="cr-row-ctrl">
-                    <select
+                    <Select
                       className="cr-inline-select"
                       value={st.subLang}
                       onChange={e => set({ subLang: e.target.value })}
                       aria-label="Sous-titres par défaut"
                     >
                       {['Désactivés', 'Français', 'English', 'Bambara'].map(x => <option key={x} value={x}>{x}</option>)}
-                    </select>
+                    </Select>
                   </div>
                 </div>
 
@@ -2021,16 +2021,16 @@ export function Subscription() {
 
               <div className="inline">
                 <label>Pays
-                  <select value={countryIso} onChange={e => onCountryChange(e.target.value)}>
+                  <Select value={countryIso} onChange={e => onCountryChange(e.target.value)}>
                     {SASPAY_COUNTRIES.map(c => (
                       <option key={c.iso} value={c.iso}>{c.name} ({c.dialCode})</option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
 
                 {flowMode === 'softpay' && (
                   <label>Réseau Mobile Money ou Carte
-                    <select
+                    <Select
                       value={networkCode}
                       onChange={e => {
                         setNetworkCode(e.target.value)
@@ -2044,7 +2044,7 @@ export function Subscription() {
                         <option key={n.code} value={n.code}>{n.label}</option>
                       ))}
                       <option value="card">Carte bancaire Visa / Mastercard</option>
-                    </select>
+                    </Select>
                   </label>
                 )}
               </div>

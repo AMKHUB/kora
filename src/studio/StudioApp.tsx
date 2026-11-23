@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { apiGet, apiPost, authErrorMessage, AuthUser, consumeAuthRedirectTokens, uploadFileToSignedUrl } from '../api'
 import { GoogleAuthButton } from '../auth'
 import { createIntentIdempotencyKey, SASPAY_COUNTRIES } from '../billing'
-import { Icon, MaintenancePage } from '../ui'
+import { Icon, MaintenancePage, Select } from '../ui'
 
 function KoraStudioIcon({ size = 34 }: { size?: number }) {
   return (
@@ -299,18 +299,18 @@ export default function StudioApp() {
 
         <div className="tt-top-right">
           {user && (
-            <button type="button" className="btn accent" onClick={startNewUpload}>
+            <button type="button" className="btn accent" onClick={startNewUpload} aria-label="Téléverser">
               <Icon n="upload" s={17} />
-              <span>Téléverser</span>
+              <span className="tt-btn-text">Téléverser</span>
             </button>
           )}
-          <a className="btn" href="/" target="_blank" rel="noopener noreferrer">
+          <a className="btn" href="/" target="_blank" rel="noopener noreferrer" aria-label="Ouvrir Kora Spectateurs">
             <Icon n="tv" s={17} />
-            <span>Kora Spectateurs</span>
+            <span className="tt-btn-text">Kora Spectateurs</span>
           </a>
           {user
             ? <button type="button" className="btn" onClick={signOut}>Déconnexion</button>
-            : <button type="button" className="btn p" onClick={() => setAuthModal(true)}><Icon n="user" s={17} />Se connecter</button>}
+            : <button type="button" className="btn p" onClick={() => setAuthModal(true)}><Icon n="user" s={17} /><span>Connexion</span></button>}
         </div>
       </header>
 
@@ -622,9 +622,9 @@ export default function StudioApp() {
                       <input className="field" required value={channel.channel_name} onChange={e => setChannel(c => ({ ...c, channel_name: e.target.value }))} placeholder="Ex. Bamako Ciné Prod" />
                     </label>
                     <label>Pays d’origine
-                      <select value={channel.country} onChange={e => setChannel(c => ({ ...c, country: e.target.value }))}>
+                      <Select value={channel.country} onChange={e => setChannel(c => ({ ...c, country: e.target.value }))}>
                         {COUNTRIES.map(c => <option key={c}>{c}</option>)}
-                      </select>
+                      </Select>
                     </label>
                     <label>Présentation / Biographie
                       <textarea className="field" rows={4} value={channel.bio} onChange={e => setChannel(c => ({ ...c, bio: e.target.value }))} placeholder="Présentez votre maison de production, vos réalisations et votre univers…" />
@@ -674,6 +674,28 @@ export default function StudioApp() {
           )}
         </main>
       </div>
+
+      <nav className="tt-bottom-dock" aria-label="Navigation mobile Kora Studio">
+        <button type="button" className={tab === 'browse' ? 'on' : ''} onClick={() => setTab('browse')}>
+          <Icon n="grid" s={19} />
+          <span>Catalogue</span>
+        </button>
+        <button type="button" className={tab === 'dashboard' ? 'on' : ''} onClick={() => setTab('dashboard')}>
+          <Icon n="home" s={19} />
+          <span>Studio</span>
+        </button>
+        <button type="button" className="tt-dock-plus" onClick={startNewUpload} aria-label="Téléverser une œuvre">
+          <Icon n="plus" s={22} />
+        </button>
+        <button type="button" className={tab === 'content' ? 'on' : ''} onClick={() => setTab('content')}>
+          <Icon n="film" s={19} />
+          <span>Contenu</span>
+        </button>
+        <button type="button" className={tab === 'analytics' ? 'on' : ''} onClick={() => setTab('analytics')}>
+          <Icon n="sparkles" s={19} />
+          <span>Revenus</span>
+        </button>
+      </nav>
 
       {authModal && (
         <div className="modal-backdrop" onClick={e => { if (e.target === e.currentTarget) setAuthModal(false) }}>
@@ -1094,12 +1116,12 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
               <h2>1. Page de couverture & bannière</h2>
               <div className="inline">
                 <label>Format de l’œuvre
-                  <select value={type} onChange={e => setType(e.target.value as StudioTitle['type'])}>
+                  <Select value={type} onChange={e => setType(e.target.value as StudioTitle['type'])}>
                     <option value="series">Série (avec saisons & épisodes)</option>
                     <option value="film">Film</option>
                     <option value="doc">Documentaire</option>
                     <option value="short">Court-métrage</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
 
@@ -1149,10 +1171,10 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
                 <textarea className="field" rows={5} value={synLong} onChange={e => setSynLong(e.target.value)} placeholder="Décrivez l’univers, les personnages et les enjeux de votre œuvre…" />
               </label>
               <div className="inline">
-                <label>Pays<select value={country} onChange={e => setCountry(e.target.value)}>{COUNTRIES.map(c => <option key={c}>{c}</option>)}</select></label>
-                <label>Langue originale<select value={origLang} onChange={e => setOrigLang(e.target.value)}>{LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</select></label>
+                <label>Pays<Select value={country} onChange={e => setCountry(e.target.value)}>{COUNTRIES.map(c => <option key={c}>{c}</option>)}</Select></label>
+                <label>Langue originale<Select value={origLang} onChange={e => setOrigLang(e.target.value)}>{LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}</Select></label>
                 <label>Année<input className="field narrow" inputMode="numeric" value={year} onChange={e => setYear(e.target.value)} /></label>
-                <label>Âge<select value={age} onChange={e => setAge(e.target.value)}>{AGES.map(a => <option key={a}>{a}</option>)}</select></label>
+                <label>Âge<Select value={age} onChange={e => setAge(e.target.value)}>{AGES.map(a => <option key={a}>{a}</option>)}</Select></label>
                 <label>Durée (min)<input className="field narrow" inputMode="numeric" value={dur} onChange={e => setDur(e.target.value)} /></label>
               </div>
               <label>Réalisation<input className="field" value={director} onChange={e => setDirector(e.target.value)} placeholder="Nom du réalisateur ou de la réalisatrice" /></label>
@@ -1260,9 +1282,9 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
                 <div className="ep-studio-item">
                   <div className="ep-studio-head">
                     <strong>Sous-titres synchronisés</strong>
-                    <select value={subLang} onChange={e => setSubLang(e.target.value)} aria-label="Langue des sous-titres" style={{ minHeight: 36 }}>
+                    <Select value={subLang} onChange={e => setSubLang(e.target.value)} aria-label="Langue des sous-titres" style={{ minHeight: 36 }}>
                       {LANGS.map(([c, n]) => <option key={c} value={c}>{n}</option>)}
-                    </select>
+                    </Select>
                   </div>
                   <div className="btns flush">
                     <label className="btn" style={{ cursor: 'pointer' }}>
@@ -1319,17 +1341,17 @@ function UploadWizard({ initial, channel, onSaved, onCancel }: {
 
               <div className="inline">
                 <label>Territoires de diffusion
-                  <select value={rightsScope} onChange={e => setRightsScope(e.target.value as any)}>
+                  <Select value={rightsScope} onChange={e => setRightsScope(e.target.value as any)}>
                     <option value="world">Monde entier & Diaspora</option>
                     <option value="west_africa">Afrique de l’Ouest uniquement</option>
                     <option value="mali">Mali uniquement</option>
-                  </select>
+                  </Select>
                 </label>
                 <label>Modèle d’accès
-                  <select value={accessTier} onChange={e => setAccessTier(e.target.value as any)}>
+                  <Select value={accessTier} onChange={e => setAccessTier(e.target.value as any)}>
                     <option value="free">Gratuit avec publicité (partage revenus pub)</option>
                     <option value="premium">Réservé Kora Premium & Famille</option>
-                  </select>
+                  </Select>
                 </label>
               </div>
 
@@ -1470,18 +1492,18 @@ function CreatorPayoutSection({ notify }: { notify: (msg: string, kind?: 'ok' | 
       <form className="form" style={{ maxWidth: 'none' }} onSubmit={submitPayout}>
         <div className="inline">
           <label>Pays du bénéficiaire
-            <select value={countryIso} onChange={e => onCountryChange(e.target.value)}>
+            <Select value={countryIso} onChange={e => onCountryChange(e.target.value)}>
               {SASPAY_COUNTRIES.map(c => (
                 <option key={c.iso} value={c.iso}>{c.name} ({c.currency})</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label>Opérateur Mobile Money
-            <select value={method} onChange={e => { setMethod(e.target.value); setIdempKey(createIntentIdempotencyKey('payout')) }}>
+            <Select value={method} onChange={e => { setMethod(e.target.value); setIdempKey(createIntentIdempotencyKey('payout')) }}>
               {activeCountry.networks.map(n => (
                 <option key={n.code} value={n.code}>{n.label}</option>
               ))}
-            </select>
+            </Select>
           </label>
           <label>Montant ({activeCountry.currency})
             <input

@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { apiPost, authErrorMessage } from './api'
 import { useApp } from './store'
-import { BrandLogo, Icon } from './ui'
+import { BrandLogo, Icon, Select } from './ui'
 
 const COUNTRIES = ['Mali', 'Sénégal', 'Côte d’Ivoire', 'Burkina Faso', 'Guinée', 'Niger', 'Bénin', 'Togo', 'Cameroun', 'Ghana', 'Nigeria', 'Afrique du Sud', 'France', 'Belgique', 'Canada', 'États-Unis', 'Autre']
 
@@ -477,9 +477,9 @@ export function AccountBox() {
           <input className="field" value={name} onChange={e => setName(e.target.value)} placeholder="Votre nom" />
         </label>
         <label>Pays de résidence
-          <select value={country} onChange={e => setCountry(e.target.value)}>
+          <Select value={country} onChange={e => setCountry(e.target.value)}>
             {COUNTRIES.map(c => <option key={c}>{c}</option>)}
-          </select>
+          </Select>
         </label>
         <button type="button" className="btn p" onClick={() => updateAccount(name, country)}>Enregistrer</button>
       </div>
